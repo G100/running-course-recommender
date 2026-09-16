@@ -24,6 +24,7 @@
 19. ✅ **도보 전용 내비게이션 UI** — 폰 화면 프레임 안에 실제 내비 앱처럼 대형 안내 배너(화살표+거리+장소명)·하단 상태바(도착예정시각·남은거리)를 구현. 자동차 내비와 구분되도록 사람 아이콘 마커 + "🚶 도보" 배지 사용
 20. ✅ **실제 GPS 기반 내비게이션** — "네비게이션 API를 따로 가져올 수 없나"라는 질문에 대한 답: 실시간 내비게이션은 별도 API가 아니라 (경로 API 1회 호출 + 기기 GPS를 경로에 매칭하는 클라이언트 로직)의 조합이고, 이미 그 매칭 로직(`locateStepsOnPath`/`updateTurnBanner`)을 갖고 있었으므로 가짜 애니메이션 대신 진짜 위치를 흘려보내면 됐음. `navigator.geolocation.watchPosition`으로 실제 위치를 받아 경로에 매칭 — 폰에서 실제로 걸으면 실제로 안내됨. GPS 권한이 없거나 응답이 없으면(데스크톱 등) 자동으로 시뮬레이션 재생으로 폴백 ([src/api/static/navigate.html](src/api/static/navigate.html) `startNavigationGPS`)
 21. ✅ **GitHub 공유 전 정리** — 데모 페이지에 하드코딩돼 있던 Tmap JS 키를 제거하고 서버가 요청마다 환경변수에서 주입하도록 변경(`{{TMAP_APP_KEY}}` 플레이스홀더, [src/api/main.py](src/api/main.py) `navigate_page`), `.gitignore`/`.env.example` 추가, 테스트 중 생성된 임시 파일 정리, 독립 저장소로 분리
+22. ✅ **키 없는 환경에서도 원인을 알 수 있게** — 팀원들이 clone 후 "API가 안 된다"고 한 문제. 원인은 키 미설정이었지만, 지도는 조용히 빈 화면(`Tmapv2 is not defined`)이 되고 코스 생성은 `500 Internal Server Error`로 끝나서 원인을 알 수 없었다. `.env` 자동 로드(python-dotenv) 추가, 서버 시작 시 누락된 키와 그로 인해 안 되는 기능 출력, `/health`가 키 설정 여부 보고(값은 비노출), 키 누락 시 `500` 대신 안내가 담긴 `503`, 데모 페이지 상단에 안내 배너 ([tests/test_missing_keys.py](tests/test_missing_keys.py))
 
 ## 현위치 기반 추천 흐름
 
@@ -46,6 +47,38 @@ N km 루프"는 지원하지 않는다. 왕복은 목표 거리를 정확히 맞
 raw 코사인 유사도를 적용하면 스케일이 다른 축(거리 km vs 신호등 개수 vs 비율 0~1)이 왜곡되므로,
 축마다 정규화된 매칭 점수를 계산한 뒤 가중합하는 방식을 채택했다 (`src/recommend/score.py`).
 
+## 팀원용 설치 (처음 clone 했다면 여기부터)
+
+```bash
+git clone https://github.com/G100/running-course-recommender.git
+cd running-course-recommender
+pip install -r requirements.txt
+copy .env.example .env      # macOS/Linux: cp .env.example .env
+```
+
+그 다음 `.env` 파일을 열어 API 키를 채운다. **키는 저장소에 올라가 있지 않다**(공개 저장소라 올리면 안 됨).
+팀 내에서 공유받은 키를 붙여넣거나 각자 발급받으면 된다 — 발급처는 [.env.example](.env.example)에 적혀 있다.
+
+```bash
+uvicorn src.api.main:app --reload    # http://localhost:8000
+```
+
+키가 빠져 있으면 서버 시작 시 무엇이 안 되는지 콘솔에 표시되고, `http://localhost:8000/health` 에서도
+어떤 키가 설정됐는지 확인할 수 있다 (키 값 자체는 노출되지 않음).
+
+### 안 될 때
+
+| 증상 | 원인 | 해결 |
+|---|---|---|
+| 지도 자리가 비어 있음, 콘솔에 `Tmapv2 is not defined` | `TMAP_APP_KEY` 없음 | `.env`에 키 입력 후 서버 재시작 |
+| 코스 추천 시 `503` + "TMAP_APP_KEY 환경변수가..." | 〃 | 〃 |
+| 코스는 나오는데 날씨/대기질이 반영 안 됨 | `KMA_API_KEY` / `AIRKOREA_API_KEY` 없음 | `.env`에 키 입력 (없어도 추천 자체는 동작) |
+| `ModuleNotFoundError: dotenv` | 의존성 미설치 | `pip install -r requirements.txt` 다시 실행 |
+| `.env`를 채웠는데도 그대로 | 서버가 이전 상태로 떠 있음 | 서버 종료 후 재시작 (`.env`는 시작 시 1회만 읽음) |
+
+DB에 저장된 22개 코스 추천은 **키가 하나도 없어도 동작한다**. 키가 필요한 건 지도 표시,
+현위치 기반 코스 생성, 턴바이턴 안내, 실시간 날씨/대기질이다.
+
 ## 실행
 
 ```bash
@@ -57,7 +90,8 @@ uvicorn src.api.main:app --reload   # http://localhost:8000 → 실제 Tmap 지�
 pytest tests/
 ```
 
-서버 실행 전에 환경변수 필요: `TMAP_APP_KEY`(지도 SDK도 같은 키 사용), `KMA_API_KEY`, `AIRKOREA_API_KEY` (Open Topo Data, Nominatim은 키 불필요). 각 키의 발급처는 [.env.example](.env.example) 참고 — 실제 키는 절대 커밋하지 말고 각자 로컬 환경변수로 설정할 것.
+API 키는 프로젝트 루트의 `.env`에서 자동으로 읽는다 (`TMAP_APP_KEY`, `KMA_API_KEY`, `AIRKOREA_API_KEY`).
+Open Topo Data와 Nominatim은 키가 필요 없다. `.env`는 `.gitignore` 대상이라 커밋되지 않는다 — 실제 키는 절대 커밋하지 말 것.
 
 ## 디렉토리
 

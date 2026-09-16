@@ -148,6 +148,10 @@
   }
 
   .envbar{ font-size:11.5px; color:var(--muted); line-height:1.5; align-self:flex-start; max-width:600px; }
+  .setup-warning{ margin:0 0 18px; padding:14px 16px; border:1px solid #E0A43B; border-left-width:4px;
+    border-radius:8px; background:#FFF8EC; color:#6B4A12; font-size:13px; line-height:1.6; max-width:760px; }
+  .setup-warning strong{ display:block; margin-bottom:4px; font-size:13.5px; }
+  .setup-warning code{ background:rgba(0,0,0,.06); padding:1px 5px; border-radius:4px; font-size:12.5px; }
   .envbar b{ color:var(--ink); font-family:"IBM Plex Mono",monospace; font-weight:600; }
 
   footer{ font-size:11.5px; color:var(--muted); text-align:center; }
@@ -160,6 +164,7 @@
     <h1>러닝 코스, 지금 바로 안내</h1>
     <p class="sub">이 페이지는 지금 돌고 있는 실제 FastAPI 서버에 매 요청을 보냅니다. 현위치 근처에 등록된 코스가 있으면 즉시, 없으면 그 자리에서 실제 경로를 새로 만들어 실제 지도 위에 그립니다.</p>
   </header>
+  {{KEY_WARNING}}
 
   <div class="layout">
     <div class="panel">

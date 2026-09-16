@@ -11,6 +11,7 @@
 """
 import json
 import os
+from contextlib import asynccontextmanager
 from typing import List, Literal, Optional
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -30,7 +31,31 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 MAIN_DB_PATH = os.path.join(DATA_DIR, "courses.json")
 SAMPLE_DB_PATH = os.path.join(DATA_DIR, "courses.sample.json")
 
-app = FastAPI(title="러닝 코스 추천 API")
+# 키가 없으면 무엇이 안 되는지. 키를 소스에 넣지 않는 대신 이걸로 안내한다.
+API_KEYS = {
+    "TMAP_APP_KEY": "지도 표시, 코스 생성, 턴바이턴 안내",
+    "KMA_API_KEY": "실시간 날씨 반영",
+    "AIRKOREA_API_KEY": "실시간 대기질 반영",
+}
+
+
+def missing_keys() -> list:
+    return [name for name in API_KEYS if not os.environ.get(name)]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    missing = missing_keys()
+    if missing:
+        lines = ["", "=" * 62, "  환경변수(API 키)가 설정되지 않아 일부 기능이 동작하지 않습니다."]
+        lines += [f"    - {name:<18} 없음 -> {API_KEYS[name]} 불가" for name in missing]
+        lines += ["", "  해결: .env.example을 .env로 복사하고 키를 채운 뒤 서버를 다시 시작하세요.",
+                  "        (DB에 저장된 코스 추천은 키 없이도 동작합니다)", "=" * 62, ""]
+        print("\n".join(lines), flush=True)
+    yield
+
+
+app = FastAPI(title="러닝 코스 추천 API", lifespan=lifespan)
 
 
 def load_courses() -> list:
@@ -80,7 +105,11 @@ class RecommendResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """키 '값'은 절대 내보내지 않고, 설정 여부만 알려준다 (팀원 환경 자가진단용)."""
+    return {
+        "status": "ok",
+        "keys": {name: bool(os.environ.get(name)) for name in API_KEYS},
+    }
 
 
 @app.get("/")
@@ -88,7 +117,20 @@ def navigate_page():
     path = os.path.join(os.path.dirname(__file__), "static", "navigate.html")
     with open(path, encoding="utf-8") as f:
         html = f.read()
+
+    # 키가 없으면 지도 SDK가 로드되지 않아 화면이 그냥 비어버린다. 이유를 화면에 띄운다.
+    warning = ""
+    if not os.environ.get("TMAP_APP_KEY"):
+        warning = (
+            '<div class="setup-warning"><strong>지도를 불러올 수 없습니다 — '
+            'TMAP_APP_KEY 환경변수가 설정되지 않았습니다.</strong>'
+            '프로젝트 폴더의 <code>.env.example</code>을 <code>.env</code>로 복사하고 '
+            'TMAP_APP_KEY 값을 채운 뒤 서버를 다시 시작하세요. '
+            '키 없이도 DB에 저장된 코스 추천 자체는 동작하지만, 지도·경로 생성·내비게이션 안내는 이용할 수 없습니다.</div>'
+        )
+
     html = html.replace("{{TMAP_APP_KEY}}", os.environ.get("TMAP_APP_KEY", ""))
+    html = html.replace("{{KEY_WARNING}}", warning)
     return HTMLResponse(html)
 
 
@@ -127,6 +169,12 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
         generated = generate_loop_course(req.current_lat, req.current_lng, target_km, tags, route_type=req.route_type)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        # 키 미설정으로 코스 생성이 불가능한 상태. 500으로 삼키면 받는 쪽이 원인을 알 수 없다.
+        raise HTTPException(
+            status_code=503,
+            detail=f"{e} .env.example을 .env로 복사해 키를 채운 뒤 서버를 다시 시작하세요.",
+        )
 
     background_tasks.add_task(register_in_background, generated)
 
