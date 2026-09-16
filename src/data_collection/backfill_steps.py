@@ -31,6 +31,20 @@ def fetch_steps_for(course: dict) -> tuple:
     return extract_steps(route), round(distance_m / 1000, 2)
 
 
+def fetch_return_leg_for(course: dict) -> tuple:
+    """왕복으로 뛸 때 쓸 돌아오는 구간. (return_path, return_steps) 반환.
+
+    저장된 건 A->B 편도뿐이라, 왕복을 고르면 돌아오는 길 안내가 없다. 좌표를 뒤집어
+    만들어낼 수는 없다 — 일방통행·횡단보도 때문에 갈 때와 올 때 안내가 실제로 다르다.
+    그래서 B->A 경로를 따로 받아둔다.
+    """
+    path = course["path"]
+    start, end = path[0], path[-1]
+    route = get_route((end[1], end[0]), (start[1], start[0]), course["name"], course["name"])
+    return_path, _ = extract_path(route)
+    return return_path, extract_steps(route)
+
+
 def backfill(db_path: str = DB_PATH, dry_run: bool = False, delay_s: float = 0.5) -> dict:
     with open(db_path, encoding="utf-8") as f:
         courses = json.load(f)
@@ -38,7 +52,13 @@ def backfill(db_path: str = DB_PATH, dry_run: bool = False, delay_s: float = 0.5
     filled, skipped, already = [], [], []
     for course in courses:
         if course.get("steps"):
-            already.append(course["id"])
+            # 편도 안내는 있는데 왕복용 복귀 구간만 없는 코스는 그것만 채운다
+            if not course.get("return_steps"):
+                course["return_path"], course["return_steps"] = fetch_return_leg_for(course)
+                filled.append((course["id"], f"복귀 {len(course['return_steps'])}"))
+                time.sleep(delay_s)
+            else:
+                already.append(course["id"])
             continue
 
         steps, new_km = fetch_steps_for(course)
@@ -52,7 +72,8 @@ def backfill(db_path: str = DB_PATH, dry_run: bool = False, delay_s: float = 0.5
         else:
             course["steps"] = steps
             course.setdefault("route_type", "oneway")
-            filled.append((course["id"], len(steps)))
+            course["return_path"], course["return_steps"] = fetch_return_leg_for(course)
+            filled.append((course["id"], f"{len(steps)} + 복귀 {len(course['return_steps'])}"))
         time.sleep(delay_s)
 
     if filled and not dry_run:

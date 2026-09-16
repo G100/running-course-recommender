@@ -58,8 +58,11 @@ def truncate_course(course: dict, target_km: float) -> dict:
 
     steps = course.get("steps")
     if steps:
+        # 왕복은 갈 때와 올 때 좌표가 같아서 "가장 가까운 점"으로 다시 찾으면 복귀 안내가
+        # 갈 때 구간으로 끌려간다. 코스를 만들 때 정해둔 위치(cum_m)가 있으면 그걸 쓴다.
         trimmed["steps"] = [
-            s for s in steps if _nearest_cum_distance([s["lat"], s["lng"]], path, cum) <= cut_m + 1
+            s for s in steps
+            if s.get("cum_m", _nearest_cum_distance([s["lat"], s["lng"]], path, cum)) <= cut_m + 1
         ]
 
     return trimmed

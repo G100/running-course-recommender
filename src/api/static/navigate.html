@@ -307,8 +307,12 @@ function stateAtFraction(path, cum, frac){
 
 // Tmap 턴바이턴 안내(steps)를 실제 경로(path) 위의 누적거리로 정렬해둔다 —
 // 애니메이션 진행률(progress distance)과 비교해서 "다음 안내까지 몇 m 남았는지" 계산하기 위함.
+// 서버가 코스를 만들 때 각 안내의 위치(cum_m)를 정해서 내려준다. 왕복은 갈 때와 올 때
+// 좌표가 같아서 여기서 "가장 가까운 점"으로 다시 찾으면 복귀 안내가 갈 때 구간으로 끌려간다.
+// cum_m이 없는 옛 응답만 예전 방식으로 위치를 추정한다.
 function locateStepsOnPath(steps, path, cum){
   return (steps || []).map(s => {
+    if (typeof s.cum_m === 'number') return { ...s, cumDistance: s.cum_m };
     let bestI = 0, bestD = Infinity;
     for (let i=0;i<path.length;i++){
       const d = haversine([s.lat, s.lng], path[i]);

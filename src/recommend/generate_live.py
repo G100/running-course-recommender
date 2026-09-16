@@ -17,6 +17,7 @@ from ..api_clients.elevation import get_elevation_profile
 from ..api_clients.tmap_pedestrian import extract_path, extract_steps, get_route
 from ..data_collection.osm_overpass import HEADERS as OSM_HEADERS
 from ..data_collection.osm_overpass import OVERPASS_URL
+from .step_position import assign_positions
 
 TAG_TO_OSM_FILTER = {
     "바다뷰": '["natural"="coastline"]',
@@ -89,6 +90,9 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
     else:
         full_path = out_path
         distance_m = out_distance_m
+
+    # 왕복은 갈 때와 올 때 좌표가 겹치므로, 안내 위치를 여기서 순서대로 확정해 저장한다
+    steps = assign_positions(steps, full_path)
 
     course_tags = [matched_tag] if matched_tag else []
     name = f"현위치 기반 {'왕복' if route_type == 'roundtrip' else '편도'} 코스 ({matched_tag or '기본'})"

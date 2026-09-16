@@ -19,7 +19,9 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from ..data_collection.add_course import add_course as register_course_full
+from ..data_collection.refresh_route import refresh_course_in_db
 from ..recommend.environment import get_environment_context
+from ..recommend.freshness import stale_courses, stamp_verified
 from ..recommend.generate_live import generate_loop_course
 from ..recommend.location import filter_nearby
 from ..recommend.nl_keywords import extract_tags
@@ -73,9 +75,20 @@ def build_env_context_map(courses: list, enabled: bool) -> Optional[dict]:
 
 def register_in_background(course: dict):
     try:
-        register_course_full(course, MAIN_DB_PATH)
+        register_course_full(stamp_verified(course), MAIN_DB_PATH)
     except Exception as e:
         print(f"[background] 코스 정밀 보강 등록 실패 ({course.get('id')}): {e}")
+
+
+def refresh_in_background(course_id: str):
+    """오래된 경로를 뒤에서 다시 받아 둔다. 실패해도 사용자 응답에는 영향이 없다."""
+    try:
+        refreshed = refresh_course_in_db(course_id, MAIN_DB_PATH)
+        if refreshed and refreshed.get("previous_distance_km"):
+            print(f"[background] 경로 변경 감지 {course_id}: "
+                  f"{refreshed['previous_distance_km']}km -> {refreshed['distance_km']}km")
+    except Exception as e:
+        print(f"[background] 경로 갱신 실패 ({course_id}): {e}")
 
 
 class RecommendRequest(BaseModel):
@@ -172,6 +185,12 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
     if not has_location or candidates:
         env_context_map = build_env_context_map(candidates, req.use_live_environment)
         ranked = recommend(candidates, user, top_n=req.top_n, env_context_map=env_context_map)
+
+        # 저장된 경로는 즉시 주되, 오래된 건 뒤에서 갱신해 다음 사람이 최신 경로를 받게 한다.
+        # 한 요청이 Tmap 할당량을 몰아 쓰지 않도록 한 번에 한 개만 갱신한다.
+        for stale in stale_courses([c for c, _ in ranked], limit=1):
+            background_tasks.add_task(refresh_in_background, stale["id"])
+
         return {
             "results": [{"course": trim_if_needed(c), "score": round(s, 4)} for c, s in ranked],
             "source": "db",
