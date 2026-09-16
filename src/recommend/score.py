@@ -54,9 +54,15 @@ def safety_match(course: dict, user: dict) -> float:
 
 
 def signal_free_match(course: dict, user: dict) -> float:
+    """끊김 정도는 신호등 총 개수가 아니라 km당 밀도로 봐야 한다.
+
+    총 개수로 보면 9km 코스(신호등 30개)가 2km 코스(0개)보다 무조건 불리해지는데,
+    실제로 달리면서 체감하는 건 "얼마나 자주 멈추느냐"이지 총 몇 번 멈췄느냐가 아니다.
+    """
     tags = set(user.get("environment_tags", []))
-    signal_count = course.get("traffic_signal_count", 0)
-    base = 1.0 / (1.0 + signal_count)
+    distance_km = max(course.get("distance_km", 0), 0.1)
+    density = course.get("traffic_signal_count", 0) / distance_km
+    base = 1.0 / (1.0 + density)
     if "차없는길" in tags:
         return base
     return 0.5 + 0.5 * base

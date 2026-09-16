@@ -4,7 +4,7 @@ import os
 import pytest
 
 from src.recommend.nl_keywords import extract_tags
-from src.recommend.score import distance_match, recommend, score_course
+from src.recommend.score import distance_match, recommend, score_course, signal_free_match
 
 SAMPLE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "courses.sample.json")
 
@@ -46,6 +46,19 @@ def test_signal_free_preference_penalizes_urban_course(courses):
     urban = next(c for c in courses if c["id"] == "gwangju-urban-01")
     park = next(c for c in courses if c["id"] == "gwangju-park-01")
     assert score_course(park, user) > score_course(urban, user)
+
+
+def test_signal_score_uses_density_not_raw_count():
+    """신호등 총 개수로만 보면 긴 코스가 구조적으로 불리해진다. 체감은 km당 밀도다."""
+    user = {"preferred_distance_km": 5, "environment_tags": set()}
+    short_dense = {"distance_km": 2.0, "traffic_signal_count": 6}   # 3개/km
+    long_sparse = {"distance_km": 9.0, "traffic_signal_count": 9}   # 1개/km
+    assert signal_free_match(long_sparse, user) > signal_free_match(short_dense, user)
+
+
+def test_signal_free_course_scores_full_marks():
+    user = {"environment_tags": set()}
+    assert signal_free_match({"distance_km": 5, "traffic_signal_count": 0}, user) == 1.0
 
 
 def test_extract_tags_from_natural_language_sentence():
