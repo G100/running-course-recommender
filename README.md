@@ -26,6 +26,12 @@
 21. ✅ **GitHub 공유 전 정리** — 데모 페이지에 하드코딩돼 있던 Tmap JS 키를 제거하고 서버가 요청마다 환경변수에서 주입하도록 변경(`{{TMAP_APP_KEY}}` 플레이스홀더, [src/api/main.py](src/api/main.py) `navigate_page`), `.gitignore`/`.env.example` 추가, 테스트 중 생성된 임시 파일 정리, 독립 저장소로 분리
 22. ✅ **키 없는 환경에서도 원인을 알 수 있게** — 팀원들이 clone 후 "API가 안 된다"고 한 문제. 원인은 키 미설정이었지만, 지도는 조용히 빈 화면(`Tmapv2 is not defined`)이 되고 코스 생성은 `500 Internal Server Error`로 끝나서 원인을 알 수 없었다. `.env` 자동 로드(python-dotenv) 추가, 서버 시작 시 누락된 키와 그로 인해 안 되는 기능 출력, `/health`가 키 설정 여부 보고(값은 비노출), 키 누락 시 `500` 대신 안내가 담긴 `503`, 데모 페이지 상단에 안내 배너 ([tests/test_missing_keys.py](tests/test_missing_keys.py))
 23. ✅ **등재된 코스 22개 전부에 턴바이턴 안내 채움** — 감사해보니 DB 코스 **22개 전부 `steps`가 비어 있었다**. 초기 코스들이 턴바이턴 기능 추가 이전에 등재된 탓인데, 여수·광주에서 추천받으면 전부 DB 코스라 **실사용에서는 내비게이션 안내가 아예 안 뜨는 상태**였다(지도에 경로는 그려져서 눈에 띄지 않았음). 저장된 시작·끝 좌표로 Tmap 경로를 다시 받아 채웠고, 재경로가 저장된 경로와 2% 넘게 다르면 코스가 바뀌는 것이므로 덮어쓰지 않고 건너뛴다 ([src/data_collection/backfill_steps.py](src/data_collection/backfill_steps.py)). 22개 전부 경로가 일치해 그대로 반영됨. 같은 종류의 구멍을 다시 놓치지 않도록 DB 무결성 테스트 추가 ([tests/test_course_db.py](tests/test_course_db.py)) — steps 존재, 안내 지점이 경로에서 50m 이내, route_type 선언 여부를 검사한다
+24. ✅ **온보딩에서 물어본 걸 실제로 추천에 반영** — `fitness_level`·`purpose`·`preferred_time_min`을 받아만 놓고 `score.py`에서 **한 번도 쓰지 않고** 있었다(사용 0회). 체력을 물어보고 무시했으니 입문자와 상급자에게 같은 코스가 나가던 셈. 세 가지를 연결함 ([src/recommend/profile.py](src/recommend/profile.py)):
+    - **페이스**: 아는 사람은 `pace_min_per_km`로 직접 입력, 모르면 `experience_level`(beginner/intermediate/advanced)로 추정
+    - **시간 → 거리 환산**: "30분 뛸래"가 이제 동작한다. 같은 30분이 입문자 3.75km / 중급 4.84km / 상급 6.0km로 환산됨
+    - **목적 → 고도 목표 + 가중치 조정**: 체중 감량은 완만하게(중간에 걸으면 지속이 안 되므로), 체력 기르기는 오르막 환영, 기록 단축은 신호등을 강하게 회피(끊기면 기록이 안 나옴). 실제로 1순위 코스의 고도가 27m↔82m로 갈린다
+    - 목적 항목은 숙련도마다 다르다(입문자에게 "인터벌 훈련"을 물어볼 수 없으므로). 앱이 문항을 하드코딩하지 않도록 `GET /onboarding/purposes?experience_level=` 로 서버가 내려준다
+    - `fitness_level`(아무 역할도 없던 필드)은 `pace_min_per_km` + `experience_level`로 대체됨 — **안드로이드 팀 온보딩 연동 시 참고**
 
 ## 현위치 기반 추천 흐름
 

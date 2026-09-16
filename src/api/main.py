@@ -23,6 +23,7 @@ from ..recommend.environment import get_environment_context
 from ..recommend.generate_live import generate_loop_course
 from ..recommend.location import filter_nearby
 from ..recommend.nl_keywords import extract_tags
+from ..recommend.profile import purposes_for, resolve_target_distance_km
 from ..recommend.route_type import apply_route_type
 from ..recommend.score import recommend, score_course
 from ..recommend.trim import truncate_course
@@ -78,7 +79,9 @@ def register_in_background(course: dict):
 
 
 class RecommendRequest(BaseModel):
-    fitness_level: Optional[int] = None
+    # 페이스는 아는 사람만 직접 입력하고, 모르면 숙련도로 추정한다 (src/recommend/profile.py)
+    pace_min_per_km: Optional[float] = None
+    experience_level: Optional[Literal["beginner", "intermediate", "advanced"]] = None
     purpose: Optional[str] = None
     preferred_distance_km: Optional[float] = None
     preferred_time_min: Optional[int] = None
@@ -101,6 +104,15 @@ class CourseResult(BaseModel):
 class RecommendResponse(BaseModel):
     results: List[CourseResult]
     source: str  # "db" | "generated"
+
+
+@app.get("/onboarding/purposes")
+def onboarding_purposes(experience_level: str = "beginner"):
+    """숙련도별로 물어볼 목적 항목. 앱이 문항을 하드코딩하지 않도록 서버가 내려준다.
+
+    입문자에게 "인터벌 훈련"을, 상급자에게 "5km 완주"를 물어보면 온보딩이 어색해진다.
+    """
+    return {"experience_level": experience_level, "purposes": purposes_for(experience_level)}
 
 
 @app.get("/health")
@@ -141,6 +153,8 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
     if req.text:
         tags |= extract_tags(req.text)
     user["environment_tags"] = tags
+    # "30분 뛸래"처럼 시간만 준 경우 페이스로 거리를 환산해 이후 단계 전부에서 같은 값을 쓴다
+    target_km = resolve_target_distance_km(user)
 
     courses = load_courses()
     has_location = req.current_lat is not None and req.current_lng is not None
@@ -151,8 +165,8 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
     candidates = [apply_route_type(c, req.route_type) for c in candidates]
 
     def trim_if_needed(course: dict) -> dict:
-        if req.preferred_distance_km:
-            return truncate_course(course, req.preferred_distance_km)
+        if target_km:
+            return truncate_course(course, target_km)
         return course
 
     if not has_location or candidates:
@@ -164,9 +178,9 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
         }
 
     # 현위치 근처에 등록된 코스가 없음 -> 그 자리에서 실제 데이터로 생성
-    target_km = req.preferred_distance_km or 3.0
+    generate_km = target_km or 3.0
     try:
-        generated = generate_loop_course(req.current_lat, req.current_lng, target_km, tags, route_type=req.route_type)
+        generated = generate_loop_course(req.current_lat, req.current_lng, generate_km, tags, route_type=req.route_type)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:

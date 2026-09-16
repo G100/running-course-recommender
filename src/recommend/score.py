@@ -4,7 +4,7 @@
 """
 import math
 
-from .vectorize import ELEVATION_PREFERENCE_TARGET_M
+from .profile import elevation_target_m, resolve_target_distance_km, tune_weights
 
 DEFAULT_WEIGHTS = {
     "distance": 0.25,
@@ -34,7 +34,7 @@ def _decay(diff: float, tolerance: float) -> float:
 def distance_match(course: dict, user: dict) -> float:
     """코스가 선호 거리보다 길어도 감점하지 않는다 — 중간에 끊고 돌아오면 되므로 완전 매칭으로 취급.
     짧은 코스는 더 늘릴 방법이 없으니(도로가 거기서 끝남) 부족한 만큼 감쇠 페널티를 준다."""
-    preferred = user.get("preferred_distance_km")
+    preferred = resolve_target_distance_km(user)
     if not preferred:
         return 0.5
     actual = course.get("distance_km", 0)
@@ -44,8 +44,7 @@ def distance_match(course: dict, user: dict) -> float:
 
 
 def elevation_match(course: dict, user: dict) -> float:
-    pref = user.get("elevation_preference", "medium")
-    target = ELEVATION_PREFERENCE_TARGET_M.get(pref, ELEVATION_PREFERENCE_TARGET_M["medium"])
+    target = elevation_target_m(user)
     diff = abs(course.get("elevation_gain_m", 0) - target)
     return _decay(diff, tolerance=target * 0.6 + 10)
 
@@ -75,6 +74,7 @@ def tag_match(course: dict, user: dict) -> float:
 def score_course(course: dict, user: dict, weights: dict = None, env_context: dict = None) -> float:
     if weights is None:
         weights = DEFAULT_WEIGHTS_WITH_ENV if env_context is not None else DEFAULT_WEIGHTS
+    weights = tune_weights(weights, user.get("purpose"))
 
     scores = {
         "distance": distance_match(course, user),
