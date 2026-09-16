@@ -36,7 +36,8 @@ SAMPLE_DB_PATH = os.path.join(DATA_DIR, "courses.sample.json")
 
 # 키가 없으면 무엇이 안 되는지. 키를 소스에 넣지 않는 대신 이걸로 안내한다.
 API_KEYS = {
-    "TMAP_APP_KEY": "지도 표시, 코스 생성, 턴바이턴 안내",
+    # 지도 그림은 MapLibre+OpenFreeMap(키 불필요)이라, 이 키는 경로·안내 데이터에만 쓰인다
+    "TMAP_APP_KEY": "코스 생성, 턴바이턴 안내",
     "KMA_API_KEY": "실시간 날씨 반영",
     "AIRKOREA_API_KEY": "실시간 대기질 반영",
 }
@@ -143,18 +144,17 @@ def navigate_page():
     with open(path, encoding="utf-8") as f:
         html = f.read()
 
-    # 키가 없으면 지도 SDK가 로드되지 않아 화면이 그냥 비어버린다. 이유를 화면에 띄운다.
+    # 지도 자체는 키가 없어도 뜨지만(OpenFreeMap), 현위치 기반 코스 생성은 Tmap 경로가 필요하다.
     warning = ""
     if not os.environ.get("TMAP_APP_KEY"):
         warning = (
-            '<div class="setup-warning"><strong>지도를 불러올 수 없습니다 — '
-            'TMAP_APP_KEY 환경변수가 설정되지 않았습니다.</strong>'
+            '<div class="setup-warning"><strong>TMAP_APP_KEY 환경변수가 설정되지 않았습니다 — '
+            '현위치 기반 코스 생성을 쓸 수 없습니다.</strong>'
             '프로젝트 폴더의 <code>.env.example</code>을 <code>.env</code>로 복사하고 '
             'TMAP_APP_KEY 값을 채운 뒤 서버를 다시 시작하세요. '
-            '키 없이도 DB에 저장된 코스 추천 자체는 동작하지만, 지도·경로 생성·내비게이션 안내는 이용할 수 없습니다.</div>'
+            '지도 표시와 DB에 저장된 코스 추천·턴바이턴 안내는 키 없이도 동작합니다.</div>'
         )
 
-    html = html.replace("{{TMAP_APP_KEY}}", os.environ.get("TMAP_APP_KEY", ""))
     html = html.replace("{{KEY_WARNING}}", warning)
     return HTMLResponse(html)
 

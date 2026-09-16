@@ -222,6 +222,7 @@
         </div>
 
         <div class="compass-btns" id="compassBtns" hidden>
+          <button id="voiceBtn" title="음성 안내 끄기/켜기">🔊</button>
           <button id="recenterBtn" title="현위치로 이동">📍</button>
         </div>
 
@@ -266,10 +267,15 @@
       <div class="envbar" id="envbar" hidden></div>
     </div>
   </div>
-  <footer>score.py 가중치(거리25%·고도15%·안전15%·신호등20%·풍경25%) 그대로 서버에서 계산 · 지도·경로·안내: Tmap API(국내 내비게이션 API) 실제 응답</footer>
+  <footer>추천 점수는 score.py 가중치 그대로 서버에서 계산 · 경로와 턴바이턴 안내: Tmap API 실제 응답 · 지도: MapLibre + OpenFreeMap(OSM) 3D · 음성: 브라우저 내장 합성</footer>
 </div>
 
-<script src="https://apis.openapi.sk.com/tmap/jsv2?version=1&appKey={{TMAP_APP_KEY}}"></script>
+<!-- 지도 렌더링만 MapLibre로 바꿨다. Tmap 웹 SDK(V2)는 2D 래스터뿐이라 기울기·3D 건물·진행방향
+     회전을 만들 수 없다 — 내비게이션처럼 보이게 하는 건 사실상 그 세 가지다. 경로와 턴바이턴
+     안내는 그대로 Tmap 응답을 쓴다(지도 그림만 바뀌고 안내 데이터는 바뀌지 않음).
+     타일은 OpenFreeMap(키 불필요·무료·무제한, OSM 기반)을 쓴다. -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.js"></script>
 <script>
 let map, polyline, runnerOverlay, animTimer, watchId = null;
 let selectedLoc = { lat: 34.7393, lng: 127.7359 };
@@ -332,6 +338,30 @@ function fmtKoreanTime(d){
   return `${period} ${h}:${String(m).padStart(2,'0')}`;
 }
 
+// 달리는 중에는 화면을 볼 수 없다. 음성이 없으면 안내가 있어도 못 듣는 것과 같다.
+// 브라우저 내장 음성합성이라 키도 외부 요청도 필요 없다.
+let voiceOn = true, spokenKey = null;
+
+function speak(text){
+  if (!voiceOn || !window.speechSynthesis) return;
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = 'ko-KR';
+  utter.rate = 1.05;
+  window.speechSynthesis.cancel();   // 이전 안내가 남아 겹쳐 읽는 것을 막는다
+  window.speechSynthesis.speak(utter);
+}
+
+function announce(step, remainingM){
+  // 같은 안내를 거리만 줄여가며 반복해서 읽으면 시끄럽다. 안내당 두 번만 말한다:
+  // 멀리서 미리 한 번(예고), 코앞에서 한 번(실행).
+  const stage = remainingM <= 30 ? 'now' : (remainingM <= 180 ? 'soon' : null);
+  if (!stage) return;
+  const key = `${step.cum_m ?? step.cumDistance}|${stage}`;
+  if (key === spokenKey) return;
+  spokenKey = key;
+  speak(stage === 'now' ? step.description : `${fmtDist(remainingM)} 앞 ${step.description}`);
+}
+
 function updateTurnBanner(locatedSteps, distanceSoFarM){
   const primary = document.getElementById('turnPrimary');
   const secondary = document.getElementById('turnSecondary');
@@ -345,10 +375,12 @@ function updateTurnBanner(locatedSteps, distanceSoFarM){
   const next = locatedSteps[nextIdx];
   const after = locatedSteps[nextIdx+1];
 
+  const remainingM = next.cumDistance - distanceSoFarM;
   primary.hidden = false;
   document.getElementById('turnArrow').textContent = turnIconFor(next.turn_type);
-  document.getElementById('turnDist').textContent = fmtDist(next.cumDistance - distanceSoFarM);
+  document.getElementById('turnDist').textContent = fmtDist(remainingM);
   document.getElementById('turnStreet').textContent = next.description;
+  announce(next, remainingM);
 
   if (after){
     secondary.hidden = false;
@@ -366,38 +398,64 @@ const RUNNER_ICON_URL = 'data:image/svg+xml,' + encodeURIComponent(
   '<path d="M13 6 L18 16 L13 13.3 L8 16 Z" fill="#ffffff"/></svg>'
 );
 
-function initMap(){
-  map = new Tmapv2.Map("map", {
-    center: new Tmapv2.LatLng(34.75, 127.75),
-    width: "100%", height: "100%", zoom: 13,
-  });
+const NAV_PITCH = 62;   // 내비게이션처럼 비스듬히 내려다보는 각도
+const NAV_ZOOM = 17.2;
+
+function markerEl(url, size){
+  const el = document.createElement('div');
+  el.style.cssText = `width:${size}px;height:${size}px;background:url("${url}") center/contain no-repeat`;
+  return el;
 }
 
 function drawCourse(course){
   document.getElementById('emptyState').hidden = true;
-  document.getElementById('map').innerHTML = '';
-  initMap();
-  const latlngs = course.path.map(p => new Tmapv2.LatLng(p[0], p[1]));
+  if (map){ map.remove(); map = null; }
 
-  polyline = new Tmapv2.Polyline({
-    path: latlngs, strokeColor: '#3E8CFF', strokeWeight: 6, strokeOpacity: 0.95, map: map,
+  const coords = course.path.map(p => [p[1], p[0]]);  // MapLibre는 [lng, lat] 순서
+  map = new maplibregl.Map({
+    container: 'map',
+    style: 'https://tiles.openfreemap.org/styles/bright',
+    center: coords[0], zoom: 15, pitch: 0, bearing: 0,
+    attributionControl: { compact: true },
   });
 
-  const bounds = new Tmapv2.LatLngBounds();
-  latlngs.forEach(p => bounds.extend(p));
-  map.fitBounds(bounds);
+  map.on('load', () => {
+    map.addSource('route', {
+      type: 'geojson',
+      data: { type: 'Feature', geometry: { type: 'LineString', coordinates: coords } },
+    });
+    // 경로 아래에 어두운 테두리를 한 겹 깔아야 밝은 지도 위에서도 선이 또렷하게 읽힌다
+    map.addLayer({ id: 'route-casing', type: 'line', source: 'route',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#1B4F9C', 'line-width': 11, 'line-opacity': 0.9 } });
+    map.addLayer({ id: 'route-line', type: 'line', source: 'route',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#3E8CFF', 'line-width': 6 } });
 
-  new Tmapv2.Marker({ position: latlngs[0], map: map, title: '출발' });
-  new Tmapv2.Marker({ position: latlngs[latlngs.length - 1], map: map, title: '도착' });
+    // 3D 건물. OSM에 높이가 있는 건물은 실제 높이로, 없으면 낮은 기본값으로 세운다.
+    map.addLayer({
+      id: '3d-buildings', source: 'openmaptiles', 'source-layer': 'building',
+      type: 'fill-extrusion', minzoom: 14,
+      paint: {
+        'fill-extrusion-color': '#c9ccd4',
+        'fill-extrusion-height': ['coalesce', ['get','render_height'], ['get','height'], 10],
+        'fill-extrusion-base': ['coalesce', ['get','render_min_height'], 0],
+        'fill-extrusion-opacity': 0.9,
+      },
+    });
 
-  runnerOverlay = new Tmapv2.Marker({
-    position: latlngs[0], map: map,
-    icon: RUNNER_ICON_URL, iconSize: new Tmapv2.Size(26, 26),
+    new maplibregl.Marker({ color: '#16794A' }).setLngLat(coords[0]).addTo(map);
+    new maplibregl.Marker({ color: '#B03030' }).setLngLat(coords[coords.length-1]).addTo(map);
+    runnerOverlay = new maplibregl.Marker({ element: markerEl(RUNNER_ICON_URL, 26) })
+      .setLngLat(coords[0]).addTo(map);
+
+    const bounds = coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
+    map.fitBounds(bounds, { padding: 46, duration: 0 });
   });
 }
 
 function recenterOnRunner(){
-  if (runnerOverlay && map) map.setCenter(runnerOverlay.getPosition());
+  if (runnerOverlay && map) map.easeTo({ center: runnerOverlay.getLngLat(), duration: 400 });
 }
 
 function fmt(n, d=1){ return Number(n).toFixed(d); }
@@ -440,12 +498,26 @@ function enterNavMode(){
   document.getElementById('bottomBar').hidden = false;
   document.getElementById('compassBtns').hidden = false;
   document.getElementById('arrivedBadge').hidden = true;
+  lastNavPos = null;
+  spokenKey = null;
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
 }
 
+let lastNavPos = null;
+
 function updateProgressUI(lat, lng, distanceSoFarM, totalM, locatedSteps, paceMinPerKm){
-  const pos = new Tmapv2.LatLng(lat, lng);
-  runnerOverlay.setPosition(pos);
-  map.panTo(pos);
+  if (!runnerOverlay || !map) return false;
+  runnerOverlay.setLngLat([lng, lat]);
+
+  // 내비게이션 카메라: 진행 방향이 항상 화면 위쪽을 향하도록 지도를 돌린다(heading-up).
+  // 지도를 북쪽 고정으로 두면 "좌회전"이 화면에서 오른쪽으로 보이는 일이 생긴다.
+  const camera = { center: [lng, lat], pitch: NAV_PITCH, zoom: NAV_ZOOM, duration: 380 };
+  if (lastNavPos && haversine(lastNavPos, [lat, lng]) > 3){
+    camera.bearing = bearing(lastNavPos, [lat, lng]);
+  }
+  if (!lastNavPos || haversine(lastNavPos, [lat, lng]) > 1) lastNavPos = [lat, lng];
+  map.easeTo(camera);
+
   updateTurnBanner(locatedSteps, distanceSoFarM);
 
   const remainKm = Math.max(0, (totalM - distanceSoFarM) / 1000);
@@ -456,6 +528,7 @@ function updateProgressUI(lat, lng, distanceSoFarM, totalM, locatedSteps, paceMi
     document.getElementById('turnPrimary').hidden = true;
     document.getElementById('turnSecondary').hidden = true;
     document.getElementById('arrivedBadge').hidden = false;
+    speak('목적지에 도착했습니다. 수고하셨습니다.');
     document.getElementById('status').textContent = '도착! 실제 서비스라면 여기서 평점·완주여부 피드백을 수집합니다.';
     document.getElementById('status').classList.remove('live');
     return true;
@@ -541,6 +614,12 @@ document.getElementById('restartBtn').addEventListener('click', () => {
   if (window._currentCourse) startNavigationSimulated(window._currentCourse);
 });
 document.getElementById('recenterBtn').addEventListener('click', recenterOnRunner);
+document.getElementById('voiceBtn').addEventListener('click', (e) => {
+  voiceOn = !voiceOn;
+  e.currentTarget.textContent = voiceOn ? '🔊' : '🔇';
+  if (!voiceOn && window.speechSynthesis) window.speechSynthesis.cancel();
+  else speak('음성 안내를 켰습니다');
+});
 document.getElementById('exitBtn').addEventListener('click', () => {
   clearInterval(animTimer);
   if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
@@ -622,7 +701,7 @@ document.getElementById('goBtn').addEventListener('click', async () => {
   }
 });
 
-initMap();
+// 코스를 받기 전에는 지도를 만들지 않는다 — drawCourse가 경로에 맞춰 새로 띄운다.
 </script>
 </body>
 </html>

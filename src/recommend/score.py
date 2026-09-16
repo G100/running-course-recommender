@@ -4,23 +4,27 @@
 """
 import math
 
+from .companion import fits_companion, tune_for_companion
 from .profile import elevation_target_m, resolve_target_distance_km, tune_weights
+from .timeofday import time_fit_match
 
 DEFAULT_WEIGHTS = {
-    "distance": 0.25,
-    "elevation": 0.15,
-    "safety": 0.15,
-    "signal_free": 0.20,
-    "tag_match": 0.25,
+    "distance": 0.22,
+    "elevation": 0.13,
+    "safety": 0.13,
+    "signal_free": 0.18,
+    "tag_match": 0.22,
+    "time_fit": 0.12,
 }
 
 DEFAULT_WEIGHTS_WITH_ENV = {
-    "distance": 0.20,
-    "elevation": 0.10,
-    "safety": 0.15,
-    "signal_free": 0.15,
-    "tag_match": 0.20,
-    "environment": 0.20,
+    "distance": 0.18,
+    "elevation": 0.09,
+    "safety": 0.13,
+    "signal_free": 0.14,
+    "tag_match": 0.18,
+    "environment": 0.18,
+    "time_fit": 0.10,
 }
 
 
@@ -81,6 +85,7 @@ def score_course(course: dict, user: dict, weights: dict = None, env_context: di
     if weights is None:
         weights = DEFAULT_WEIGHTS_WITH_ENV if env_context is not None else DEFAULT_WEIGHTS
     weights = tune_weights(weights, user.get("purpose"))
+    weights = tune_for_companion(weights, user.get("companion"))
 
     scores = {
         "distance": distance_match(course, user),
@@ -88,6 +93,7 @@ def score_course(course: dict, user: dict, weights: dict = None, env_context: di
         "safety": safety_match(course, user),
         "signal_free": signal_free_match(course, user),
         "tag_match": tag_match(course, user),
+        "time_fit": time_fit_match(course, user),
     }
     if "environment" in weights:
         from .environment import environment_score
@@ -117,6 +123,10 @@ def recommend(courses: list, user: dict, top_n: int = 5, weights: dict = None, e
     env_context_map: {course_id: environment_context} 를 주면 실시간 날씨/대기질을 점수에 반영.
     """
     candidates = filter_by_required_tags(courses, user)
+    companion = user.get("companion")
+    if companion:
+        # 유아차에 200m 오르막은 "덜 어울리는 정도"가 아니라 불가능한 코스다 — 점수가 아니라 제외로 다룬다
+        candidates = [c for c in candidates if fits_companion(c, companion)]
     scored = [
         (c, score_course(c, user, weights, env_context=(env_context_map or {}).get(c["id"]) if env_context_map else None))
         for c in candidates
