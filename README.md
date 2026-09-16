@@ -14,7 +14,7 @@
 9. ✅ **기상청 단기예보 API** — 위경도→격자 자동변환 포함, 실제 키로 검증 완료 ([src/api_clients/kma_weather.py](src/api_clients/kma_weather.py))
 10. ✅ **에어코리아 대기질 API** — 실제 키로 검증 완료, 측정소명 매핑 문서화 ([src/api_clients/airkorea.py](src/api_clients/airkorea.py), [data/air_quality_stations.md](data/air_quality_stations.md))
 11. ✅ **실시간 날씨/대기질을 추천 점수에 반영** — MVP 스코프에 명시된 기능이었는데 API만 만들고 실제로 안 붙어있던 걸 연결함 ([src/recommend/environment.py](src/recommend/environment.py), `/recommend`에 `use_live_environment` 옵션으로 노출)
-12. 🔲 **공공데이터 치안시설/CCTV API** — 안전점수(`safety_score`) 계산용, 키 발급 대기 중 (지금은 모든 코스 0.75 고정값)
+12. ✅ **종합 치안 점수** — 30번 참고 (모든 코스 0.75 고정값이던 문제 해결)
 13. ✅ **현위치 기반 하이브리드 추천** — DB에 근처(기본 5km) 코스가 있으면 즉시 반환, 없으면 그 자리에서 실제 도로/지형 데이터로 코스를 생성해 반환하고 백그라운드로 정밀 보강해 DB에 편입 (다음 요청부터는 빨라짐) ([src/recommend/generate_live.py](src/recommend/generate_live.py), [src/recommend/location.py](src/recommend/location.py))
 14. ✅ **선호 태그는 필수 조건으로 처리** — "바다뷰"를 골랐는데 내륙 코스가 점수로 끼어드는 문제 수정. `environment_tags`가 있으면 하나도 안 겹치는 코스는 결과에서 완전히 제외 ([src/recommend/score.py](src/recommend/score.py) `filter_by_required_tags`)
 15. ✅ **선호 거리보다 긴 코스는 잘라서 반환** — "5km 달리고 싶다"인데 8km 코스를 그대로 주지 않고, 목표 거리만큼 경로를 잘라서(중간에 돌아오면 되니까) 정확히 원하는 길이로 응답 ([src/recommend/trim.py](src/recommend/trim.py))
@@ -46,6 +46,14 @@
     - **진행 방향이 화면 위를 향하도록 지도 회전**(heading-up). 북쪽 고정이면 "좌회전"이 화면에선 오른쪽으로 보이는 일이 생긴다. 주행 중 회전각이 -86°→-33°→17°→-146°로 실제로 따라가는 것 확인
     - **음성 안내**(브라우저 내장 음성합성, 키 불필요). 달리면서는 화면을 볼 수 없으므로 음성이 없으면 안내가 있어도 못 듣는 것과 같다. 안내당 두 번만 읽는다 — 멀리서 예고 한 번, 코앞에서 실행 한 번
     - 트레이드오프: 지도 라벨·POI가 OSM 기반이라 Tmap보다 상호 정보가 덜 촘촘하다. 대신 **지도 표시에 API 키가 아예 필요 없어져** 팀원 세팅이 더 쉬워졌다
+
+30. ✅ **종합 치안 점수 — `safety_score`가 드디어 코스를 구분한다** — 26개 코스 전부 `0.75` 고정값이라 스코어링의 안전 가중치(13~15%)가 **아무 코스도 구분하지 못한 채** 돌아가고 있었다. CCTV 하나로 치안을 대표할 수 없어서 세 축으로 나눠 합쳤다 ([src/recommend/safety.py](src/recommend/safety.py)):
+    - **감시 장비** (CCTV 밀도) · **밤에도 사람이 다니는가** (편의점 밀도 — 24시간 영업이라 야간 유동인구의 대리 지표) · **도움을 청할 곳이 가까운가** (지구대·파출소까지 거리)
+    - 결과: 전부 0.75였던 값이 **0.264~1.0으로 분포**한다. 만점 기준은 임의로 정하지 않고 실제 26개 코스의 밀도 분포 상위 10% 지점에 맞췄다 — 처음 잡은 기준(CCTV 2/km)으로는 도심 코스 5개가 전부 만점으로 뭉쳐 서로 구분되지 않았다
+    - 코스마다 따로 조회하면 Overpass 속도 제한에 걸리므로 **지역별로 한 번에 받아 로컬에서 계산**한다(26개 코스에 질의 2회) ([src/data_collection/backfill_safety.py](src/data_collection/backfill_safety.py))
+    - **남은 한계 (솔직히)**: 가로등은 OSM에 한국 데이터가 사실상 없어(광주 전역 0개) 빠져 있고, CCTV도 지자체 공식 데이터가 아닌 OSM 수집분이라 실제보다 적게 잡힌다. 공공데이터포털 키는 **데이터셋마다 따로 활용신청**해야 해서(에어코리아 키로 다른 데이터셋 호출 시 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR` 확인) 가로등·공식 CCTV 데이터셋을 신청하면 같은 구조에 소스만 추가하면 된다
+31. ✅ **왕복을 자르면 출발점으로 돌아오지 못하던 문제** — 기본값이 왕복인데, 7km 왕복을 3km로 요청하면 반환점 근처에서 잘려 **집에서 2.45km 떨어진 곳에 남겨졌다**. 목표 거리에서 그냥 끊는 대신 **반환점을 절반 지점으로 당기고** 거기서 가장 가까운 복귀 경로 지점부터 이어 붙인다. 실제 코스 전부에서 종료 지점이 출발점으로부터 **0m**가 되는 것을 확인했다 ([src/recommend/trim.py](src/recommend/trim.py) `_truncate_roundtrip`)
+32. ✅ **장거리 코스 보강 (22개 → 26개)** — 앞서 "10km 이상 후보 0개"라고 적었던 건 **편도 기준만 본 것**이라 정정한다(왕복 감안 시 13개였음). 실제 구멍은 편도 10km 이상 0개, 왕복 15km 이상 1개였다. 장거리 4개를 추가해 편도 10km↑ 2개, 왕복 15km↑ 5개, 20km↑ 2개, 25km↑ 1개가 됐다
 
 ## 현위치 기반 추천 흐름
 
@@ -96,7 +104,7 @@ uvicorn src.api.main:app --reload    # http://localhost:8000
 | `ModuleNotFoundError: dotenv` | 의존성 미설치 | `pip install -r requirements.txt` 다시 실행 |
 | `.env`를 채웠는데도 그대로 | 서버가 이전 상태로 떠 있음 | 서버 종료 후 재시작 (`.env`는 시작 시 1회만 읽음) |
 
-DB에 저장된 22개 코스 추천은 **키가 하나도 없어도 동작한다**. 키가 필요한 건 지도 표시,
+DB에 저장된 26개 코스 추천은 **키가 하나도 없어도 동작한다**. 키가 필요한 건 지도 표시,
 현위치 기반 코스 생성, 턴바이턴 안내, 실시간 날씨/대기질이다.
 
 ## 실행
