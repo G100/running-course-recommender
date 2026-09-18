@@ -5,7 +5,8 @@
 """
 import pytest
 
-from src.recommend.companion import COMPANIONS, companion_limits, companion_options, tune_for_companion
+from src.recommend.companion import (COMPANIONS, companion_limits, companion_options, fits_companion,
+                                     tune_for_companion)
 from src.recommend.score import DEFAULT_WEIGHTS
 
 FLAT_CARFREE = {"distance_km": 5, "elevation_gain_m": 10, "traffic_signal_count": 0, "tags": ["차없는길"]}
@@ -48,6 +49,24 @@ def test_companions_cap_distance_and_elevation_differently():
 def test_running_alone_has_no_special_limits():
     limits = companion_limits("혼자")
     assert limits["max_distance_km"] == float("inf")
+
+
+def test_long_course_fits_once_trimmed_to_the_target():
+    """10km 코스라도 3km만 뛴다면 유아차 상한(5km)에 걸리지 않아야 한다."""
+    long_flat = {"distance_km": 10, "elevation_gain_m": 30}
+    assert fits_companion(long_flat, "유아차", target_km=3)
+    assert not fits_companion(long_flat, "유아차")
+
+
+def test_steep_course_still_excluded_after_trimming():
+    steep = {"distance_km": 4, "elevation_gain_m": 200}
+    assert not fits_companion(steep, "유아차", target_km=3)
+
+
+def test_target_distance_is_capped_by_companion():
+    from src.recommend.profile import resolve_target_distance_km
+    assert resolve_target_distance_km({"preferred_distance_km": 10, "companion": "유아차"}) == 5.0
+    assert resolve_target_distance_km({"preferred_distance_km": 10, "companion": "혼자"}) == 10
 
 
 def test_small_dog_is_capped_shorter_than_big_dog():

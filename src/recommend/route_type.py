@@ -9,7 +9,7 @@ from .step_position import assign_positions, cumulative_distances
 ROUTE_TYPES = ("roundtrip", "oneway")
 
 
-def make_roundtrip(course: dict) -> dict:
+def make_roundtrip(course: dict, with_steps: bool = True) -> dict:
     """편도 경로에 되돌아오는 구간을 이어붙여 왕복으로 만든다.
 
     복귀 경로(return_path/return_steps)가 저장돼 있으면 그 실제 경로와 안내를 쓴다.
@@ -33,7 +33,7 @@ def make_roundtrip(course: dict) -> dict:
     result["cum_outbound_m"] = cumulative_distances(path)[-1]
 
     steps = course.get("steps")
-    if steps:
+    if steps and with_steps:
         return_steps = course.get("return_steps")
         if not return_steps:
             return_steps = [{
@@ -49,7 +49,9 @@ def mark_oneway(course: dict) -> dict:
     return dict(course, route_type="oneway")
 
 
-def apply_route_type(course: dict, route_type: str) -> dict:
+def apply_route_type(course: dict, route_type: str, with_steps: bool = True) -> dict:
+    """with_steps=False면 점수 계산에 필요한 거리·고도만 맞춘다. 안내 위치 계산은 비싸서
+    전체 후보가 아니라 최종 결과로 나갈 코스에만 한다."""
     if route_type == "roundtrip":
-        return make_roundtrip(course)
+        return make_roundtrip(course, with_steps=with_steps)
     return mark_oneway(course)

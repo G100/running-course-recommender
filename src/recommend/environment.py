@@ -1,13 +1,29 @@
-"""실시간 날씨/대기질을 코스 추천 점수에 반영.
+"""실시간 날씨를 코스 추천 점수에 반영.
 
-MVP 스코프: "실시간 날씨/대기질 반영한 추천 조정" (프로젝트 문서 명시).
-코스별 대표좌표/측정소는 course_stations.py의 근사 매핑을 사용.
+- 모든 코스가 자기 경로 좌표로 날씨를 받는다. 일부 코스만 날씨가 반영되면, 맑은 날엔
+  그 코스들만 점수가 올라가는 편향이 생긴다.
+- 기상청 호출은 건당 2초 안팎이다. 예보 격자(5km) 단위로 30분 캐시하고, 서로 다른 격자는
+  병렬로 받는다 — 순서대로 받으면 코스 26개(격자 11개)에 첫 요청이 27초 걸렸다.
 """
-from ..api_clients.airkorea import get_air_quality
-from ..api_clients.kma_weather import get_short_term_forecast
-from .course_stations import COURSE_ENV_CONTEXT
+import time
+from concurrent.futures import ThreadPoolExecutor
 
-_station_cache = {}
+from ..api_clients.kma_weather import get_short_term_forecast, latlon_to_grid
+
+CACHE_TTL_S = 30 * 60
+MAX_PARALLEL = 12
+
+_cache = {}
+
+
+def _cached(key, fetch):
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < CACHE_TTL_S:
+        return hit[1]
+    value = fetch()
+    if value:  # 실패(빈 값)는 저장하지 않는다 — 일시 오류가 30분간 굳지 않도록
+        _cache[key] = (time.time(), value)
+    return value
 
 
 def _nearest_forecast_item(items: list, category: str):
@@ -19,48 +35,47 @@ def _nearest_forecast_item(items: list, category: str):
 
 def fetch_weather(lat: float, lng: float) -> dict:
     """POP(강수확률%), TMP(기온), SKY(하늘상태코드) 반환. 실패 시 빈 dict."""
-    try:
-        resp = get_short_term_forecast(lat, lng)
-        items = resp.get("response", {}).get("body", {}).get("items", {}).get("item", [])
-        return {
-            "pop": _nearest_forecast_item(items, "POP"),
-            "tmp": _nearest_forecast_item(items, "TMP"),
-            "sky": _nearest_forecast_item(items, "SKY"),
-        }
-    except Exception:
-        return {}
+    def fetch():
+        try:
+            resp = get_short_term_forecast(lat, lng)
+            items = resp.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            return {
+                "pop": _nearest_forecast_item(items, "POP"),
+                "tmp": _nearest_forecast_item(items, "TMP"),
+                "sky": _nearest_forecast_item(items, "SKY"),
+            }
+        except Exception:
+            return {}
+
+    return _cached(("weather", latlon_to_grid(lat, lng)), fetch)
 
 
-def fetch_air_quality(station: str) -> dict:
-    """pm10Grade/pm25Grade(1=좋음~4=매우나쁨) 반환. 실패 시 빈 dict. 측정소 단위로 캐싱."""
-    if station in _station_cache:
-        return _station_cache[station]
-    try:
-        resp = get_air_quality(station)
-        items = resp.get("response", {}).get("body", {}).get("items", [])
-        result = {}
-        if items:
-            latest = items[0]
-            result = {"pm10_grade": latest.get("pm10Grade"), "pm25_grade": latest.get("pm25Grade")}
-    except Exception:
-        result = {}
-    _station_cache[station] = result
-    return result
+def _course_point(course: dict):
+    path = course.get("path") or []
+    return tuple(path[len(path) // 2]) if path else None
 
 
-def get_environment_context(course_id: str) -> dict:
-    """코스 id -> {pop, tmp, sky, pm10_grade, pm25_grade}. 매핑 없으면 빈 dict."""
-    mapping = COURSE_ENV_CONTEXT.get(course_id)
-    if not mapping:
-        return {}
-    context = {}
-    context.update(fetch_weather(mapping["lat"], mapping["lng"]))
-    context.update(fetch_air_quality(mapping["station"]))
-    return context
+def get_environment_context(course: dict) -> dict:
+    """코스 -> {pop, tmp, sky}. 조회에 실패하면 빈 dict(점수는 중립으로 처리됨)."""
+    point = _course_point(course)
+    return fetch_weather(*point) if point else {}
+
+
+def environment_context_map(courses: list) -> dict:
+    """{course_id: context}. 격자마다 한 번씩, 병렬로 받은 뒤 캐시에서 채운다."""
+    by_grid = {}
+    for course in courses:
+        point = _course_point(course)
+        if point:
+            by_grid.setdefault(latlon_to_grid(*point), point)
+    if by_grid:
+        with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL, len(by_grid))) as pool:
+            list(pool.map(lambda p: fetch_weather(*p), by_grid.values()))
+    return {c["id"]: get_environment_context(c) for c in courses}
 
 
 def environment_score(context: dict) -> float:
-    """날씨/대기질이 지금 러닝하기 얼마나 적합한지 0~1. 데이터 없으면 중립값 0.5."""
+    """날씨가 지금 러닝하기 얼마나 적합한지 0~1. 데이터 없으면 중립값 0.5."""
     if not context:
         return 0.5
 
@@ -74,19 +89,6 @@ def environment_score(context: dict) -> float:
         elif pop >= 40:
             score -= 0.2
         elif pop >= 20:
-            score -= 0.05
-
-    grade = max(
-        (g for g in [context.get("pm10_grade"), context.get("pm25_grade")] if g not in (None, "")),
-        default=None, key=lambda g: int(g),
-    )
-    if grade is not None:
-        grade = int(grade)
-        if grade == 4:
-            score -= 0.5
-        elif grade == 3:
-            score -= 0.25
-        elif grade == 2:
             score -= 0.05
 
     tmp = context.get("tmp")

@@ -59,8 +59,14 @@ def tune_for_companion(weights: dict, companion: str) -> dict:
     return {k: v / total for k, v in adjusted.items()}
 
 
-def fits_companion(course: dict, companion: str) -> bool:
-    """상한선을 넘는 코스는 추천 후보에서 제외한다."""
+def fits_companion(course: dict, companion: str, target_km: float = None) -> bool:
+    """상한선을 넘는 코스는 추천 후보에서 제외한다.
+
+    긴 코스는 목표 거리로 잘려서 나가므로, 코스 전체가 아니라 실제로 뛰게 될 구간으로 판단한다.
+    전체 길이로 거르면(왕복은 거리·고도가 2배) 짧게 뛸 사람에게 맞는 코스까지 전부 탈락한다.
+    """
     limits = companion_limits(companion)
-    return (course.get("distance_km", 0) <= limits["max_distance_km"]
-            and course.get("elevation_gain_m", 0) <= limits["max_elevation_gain_m"])
+    full_km = course.get("distance_km", 0)
+    run_km = min(full_km, target_km) if target_km else full_km
+    run_elev = course.get("elevation_gain_m", 0) * (run_km / full_km if full_km else 1)  # 구간비례 근사
+    return run_km <= limits["max_distance_km"] and run_elev <= limits["max_elevation_gain_m"]

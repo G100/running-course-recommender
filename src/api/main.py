@@ -16,11 +16,12 @@ from typing import List, Literal, Optional
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from ..data_collection.add_course import add_course as register_course_full
 from ..data_collection.refresh_route import refresh_course_in_db
-from ..recommend.environment import get_environment_context
+from ..recommend.companion import COMPANIONS, companion_options
+from ..recommend.environment import environment_context_map
 from ..recommend.freshness import stale_courses, stamp_verified
 from ..recommend.generate_live import generate_loop_course
 from ..recommend.location import filter_nearby
@@ -39,7 +40,6 @@ API_KEYS = {
     # 지도 그림은 MapLibre+OpenFreeMap(키 불필요)이라, 이 키는 경로·안내 데이터에만 쓰인다
     "TMAP_APP_KEY": "코스 생성, 턴바이턴 안내",
     "KMA_API_KEY": "실시간 날씨 반영",
-    "AIRKOREA_API_KEY": "실시간 대기질 반영",
 }
 
 
@@ -62,16 +62,25 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="러닝 코스 추천 API", lifespan=lifespan)
 
 
+_db_cache = {"key": None, "courses": None}
+
+
 def load_courses() -> list:
+    """파일이 바뀌었을 때만 다시 읽는다(백그라운드 갱신·신규 등록이 파일을 고치면 수정 시각이 바뀜).
+    요청마다 전체 JSON을 파싱하면 경로·복귀 경로까지 담긴 DB라 그것만으로 0.15초가 든다."""
     path = MAIN_DB_PATH if os.path.exists(MAIN_DB_PATH) else SAMPLE_DB_PATH
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    key = (path, os.path.getmtime(path))
+    if _db_cache["key"] != key:
+        with open(path, encoding="utf-8") as f:
+            _db_cache["courses"] = json.load(f)
+        _db_cache["key"] = key
+    return _db_cache["courses"]
 
 
 def build_env_context_map(courses: list, enabled: bool) -> Optional[dict]:
     if not enabled:
         return None
-    return {c["id"]: get_environment_context(c["id"]) for c in courses}
+    return environment_context_map(courses)
 
 
 def register_in_background(course: dict):
@@ -108,6 +117,16 @@ class RecommendRequest(BaseModel):
     current_lng: Optional[float] = None
     max_distance_km: float = 5.0
     route_type: Literal["roundtrip", "oneway"] = "roundtrip"
+    companion: Optional[str] = None  # 값 목록: GET /onboarding/companions
+    time_of_day: Optional[Literal["morning", "afternoon", "evening", "night"]] = None  # 생략하면 서버 시각 기준
+
+    @field_validator("companion")
+    @classmethod
+    def _known_companion(cls, v):
+        # 오타("유모차")를 조용히 무시하면 앱은 반영된 줄 안다 — 거부해서 바로 드러나게 한다
+        if v is not None and v not in COMPANIONS:
+            raise ValueError(f"companion은 {list(COMPANIONS)} 중 하나여야 합니다")
+        return v
 
 
 class CourseResult(BaseModel):
@@ -127,6 +146,11 @@ def onboarding_purposes(experience_level: str = "beginner"):
     입문자에게 "인터벌 훈련"을, 상급자에게 "5km 완주"를 물어보면 온보딩이 어색해진다.
     """
     return {"experience_level": experience_level, "purposes": purposes_for(experience_level)}
+
+
+@app.get("/onboarding/companions")
+def onboarding_companions():
+    return {"companions": companion_options()}
 
 
 @app.get("/health")
@@ -175,7 +199,8 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
     candidates = courses
     if has_location:
         candidates = filter_nearby(courses, req.current_lat, req.current_lng, req.max_distance_km)
-    candidates = [apply_route_type(c, req.route_type) for c in candidates]
+    originals = {c["id"]: c for c in candidates}
+    candidates = [apply_route_type(c, req.route_type, with_steps=False) for c in candidates]
 
     def trim_if_needed(course: dict) -> dict:
         if target_km:
@@ -191,8 +216,12 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
         for stale in stale_courses([c for c, _ in ranked], limit=1):
             background_tasks.add_task(refresh_in_background, stale["id"])
 
+        # 턴바이턴 위치 계산은 결과로 나갈 코스에만 한다
         return {
-            "results": [{"course": trim_if_needed(c), "score": round(s, 4)} for c, s in ranked],
+            "results": [
+                {"course": trim_if_needed(apply_route_type(originals[c["id"]], req.route_type)), "score": round(s, 4)}
+                for c, s in ranked
+            ],
             "source": "db",
         }
 

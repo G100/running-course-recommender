@@ -126,7 +126,8 @@ def recommend(courses: list, user: dict, top_n: int = 5, weights: dict = None, e
     companion = user.get("companion")
     if companion:
         # 유아차에 200m 오르막은 "덜 어울리는 정도"가 아니라 불가능한 코스다 — 점수가 아니라 제외로 다룬다
-        candidates = [c for c in candidates if fits_companion(c, companion)]
+        target_km = resolve_target_distance_km(user)
+        candidates = [c for c in candidates if fits_companion(c, companion, target_km)]
     scored = [
         (c, score_course(c, user, weights, env_context=(env_context_map or {}).get(c["id"]) if env_context_map else None))
         for c in candidates

@@ -1,5 +1,6 @@
-requests>=2.31
-python-dotenv>=1.0
-pytest>=8.0
-fastapi>=0.110
-uvicorn>=0.29
+fastapi==0.141.1
+uvicorn==0.53.0
+requests==2.34.2
+python-dotenv==1.2.3
+pytest==9.1.1
+httpx2==2.13.0

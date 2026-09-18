@@ -10,6 +10,8 @@
 """
 from ..data_collection.enrich import haversine_m
 
+ON_PATH_M = 2.0
+
 
 def cumulative_distances(path: list) -> list:
     """경로 각 지점까지의 누적 거리(m)."""
@@ -33,6 +35,10 @@ def assign_positions(steps: list, path: list) -> list:
             d = haversine_m((step["lat"], step["lng"]), path[i])
             if d < best_d:
                 best_i, best_d = i, d
+            # Tmap 안내 지점은 경로 꼭짓점 위에 있다. 앞으로 가다 처음 만나는 일치점이 정답이므로
+            # 거기서 멈춘다 — 끝까지 훑으면 장거리 코스에서 요청 하나가 수 초씩 걸린다.
+            if d <= ON_PATH_M:
+                break
         placed.append({**step, "cum_m": cum[best_i]})
         # 다음 안내는 반드시 이 지점 "뒤"에서 찾는다. 같은 지점에 머물게 두면 왕복에서
         # 돌아오는 길 안내가 출발점(같은 좌표)에 그대로 붙어버린다.

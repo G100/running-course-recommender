@@ -55,13 +55,20 @@ def resolve_pace(user: dict) -> float:
 
 
 def resolve_target_distance_km(user: dict):
-    """목표 거리(km). 거리를 직접 골랐으면 그대로, 시간만 골랐으면 페이스로 환산한다."""
+    """목표 거리(km). 거리를 직접 골랐으면 그대로, 시간만 골랐으면 페이스로 환산한다.
+
+    동반자 상한보다 길면 상한으로 줄인다 — 유아차로 10km를 요청해도 5km 코스를 준다.
+    """
+    from .companion import companion_limits
+
     if user.get("preferred_distance_km"):
-        return user["preferred_distance_km"]
-    minutes = user.get("preferred_time_min")
-    if not minutes:
+        target = user["preferred_distance_km"]
+    elif user.get("preferred_time_min"):
+        target = round(user["preferred_time_min"] / resolve_pace(user), 2)
+    else:
         return None
-    return round(minutes / resolve_pace(user), 2)
+    cap = companion_limits(user.get("companion"))["max_distance_km"]
+    return min(target, cap)
 
 
 def purposes_for(experience_level: str) -> list:
