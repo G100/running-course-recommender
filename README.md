@@ -4,6 +4,8 @@
 
 ## 빠른 시작
 
+**Python 3.10 이상 필요** (3.10 ~ 3.14, 아나콘다 3.11에서 확인). `python --version`으로 먼저 확인하세요.
+
 ```bash
 git clone https://github.com/G100/running-course-recommender.git
 cd running-course-recommender
@@ -119,6 +121,7 @@ tests/                테스트
 
 | 증상 | 해결 |
 |---|---|
+| `pip install`에서 `No matching distribution` / `requires Python>=3.10` | 파이썬 3.10 이상 설치 후 가상환경을 다시 만들기 |
 | `uvicorn`을 찾을 수 없음 | `python -m uvicorn ...`으로 실행 |
 | `ModuleNotFoundError` 또는 테스트 수집 오류 | `pip install -r requirements.txt` 다시 실행 |
 | 실시간 코스 생성이 `503` | `.env`에 `TMAP_APP_KEY` 입력 후 서버 재시작 |
