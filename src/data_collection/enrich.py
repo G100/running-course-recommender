@@ -80,6 +80,11 @@ def derive_tags(green: float, coastal: float, signals: int) -> list:
 
 def enrich_course(course: dict, osm_features: dict) -> dict:
     """course에 path가 있어야 함. osm_features는 osm_overpass.fetch_osm_features() 반환값."""
+    if osm_features.get("osm_available") is False:
+        enriched = dict(course)
+        enriched["osm_enrichment_pending"] = True
+        return enriched
+
     path = course.get("path", [])
     green = green_ratio(path, osm_features.get("green_areas", []))
     coastal = coastline_proximity(path, osm_features.get("coastline", []))

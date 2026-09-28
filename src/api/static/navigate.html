@@ -340,21 +340,23 @@ function fmtKoreanTime(d){
 
 // 달리는 중에는 화면을 볼 수 없다. 음성이 없으면 안내가 있어도 못 듣는 것과 같다.
 // 브라우저 내장 음성합성이라 키도 외부 요청도 필요 없다.
-let voiceOn = true, spokenKey = null;
+let voiceOn = true, spokenKey = null, simulatedNavigation = false;
 
-function speak(text){
+function speak(text, interrupt=false){
   if (!voiceOn || !window.speechSynthesis) return;
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = 'ko-KR';
   utter.rate = 1.05;
-  window.speechSynthesis.cancel();   // 이전 안내가 남아 겹쳐 읽는 것을 막는다
+  if (interrupt) window.speechSynthesis.cancel();
   window.speechSynthesis.speak(utter);
 }
 
 function announce(step, remainingM){
   // 같은 안내를 거리만 줄여가며 반복해서 읽으면 시끄럽다. 안내당 두 번만 말한다:
   // 멀리서 미리 한 번(예고), 코앞에서 한 번(실행).
-  const stage = remainingM <= 30 ? 'now' : (remainingM <= 180 ? 'soon' : null);
+  const stage = simulatedNavigation
+    ? (remainingM <= 180 ? 'soon' : null)
+    : (remainingM <= 30 ? 'now' : (remainingM <= 180 ? 'soon' : null));
   if (!stage) return;
   const key = `${step.cum_m ?? step.cumDistance}|${stage}`;
   if (key === spokenKey) return;
@@ -528,7 +530,7 @@ function updateProgressUI(lat, lng, distanceSoFarM, totalM, locatedSteps, paceMi
     document.getElementById('turnPrimary').hidden = true;
     document.getElementById('turnSecondary').hidden = true;
     document.getElementById('arrivedBadge').hidden = false;
-    speak('목적지에 도착했습니다. 수고하셨습니다.');
+    speak('목적지에 도착했습니다. 수고하셨습니다.', true);
     document.getElementById('status').textContent = '도착! 실제 서비스라면 여기서 평점·완주여부 피드백을 수집합니다.';
     document.getElementById('status').classList.remove('live');
     return true;
@@ -539,11 +541,12 @@ function updateProgressUI(lat, lng, distanceSoFarM, totalM, locatedSteps, paceMi
 // 데스크톱에서 코스를 미리 보기 위한 가짜 재생 — 실제 위치가 아니라 압축된 타이머로 경로를 훑는다.
 function startNavigationSimulated(course){
   enterNavMode();
+  simulatedNavigation = true;
   const pathArr = course.path;
   const cum = cumulativeDistances(pathArr);
   const total = cum[cum.length-1];
   const locatedSteps = locateStepsOnPath(course.steps, pathArr, cum);
-  const durationMs = 16000;
+  const durationMs = Math.max(16000, locatedSteps.length * 1500);
   const t0 = performance.now();
 
   document.getElementById('status').textContent = '시뮬레이션 재생 중 (실제 위치 아님 — 페이스를 데모용으로 압축, 안내 문구는 Tmap 실제 응답)';
@@ -567,6 +570,7 @@ function startNavigationGPS(course){
     return startNavigationSimulated(course);
   }
   enterNavMode();
+  simulatedNavigation = false;
   const pathArr = course.path;
   const cum = cumulativeDistances(pathArr);
   const total = cum[cum.length-1];
@@ -618,7 +622,7 @@ document.getElementById('voiceBtn').addEventListener('click', (e) => {
   voiceOn = !voiceOn;
   e.currentTarget.textContent = voiceOn ? '🔊' : '🔇';
   if (!voiceOn && window.speechSynthesis) window.speechSynthesis.cancel();
-  else speak('음성 안내를 켰습니다');
+  else speak('음성 안내를 켰습니다', true);
 });
 document.getElementById('exitBtn').addEventListener('click', () => {
   clearInterval(animTimer);

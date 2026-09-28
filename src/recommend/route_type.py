@@ -5,8 +5,32 @@ DB에 저장된 코스는 전부 "랜드마크A ~ 랜드마크B" 편도 경로�
 """
 
 from .step_position import assign_positions, cumulative_distances
+from ..api_clients.tmap_pedestrian import extract_path, extract_steps, get_route
 
 ROUTE_TYPES = ("roundtrip", "oneway")
+
+
+def attach_actual_return_path(course: dict) -> dict:
+    """DB 편도 코스에 Tmap의 실제 복귀 경로를 붙인다. 실패하면 원본을 유지한다."""
+    if course.get("return_path"):
+        return course
+    path = course.get("path") or []
+    if len(path) < 2:
+        return course
+
+    try:
+        start = (path[0][1], path[0][0])
+        end = (path[-1][1], path[-1][0])
+        route = get_route(end, start, start_name=course.get("name", ""), end_name=course.get("name", ""))
+        return_path, _ = extract_path(route)
+        if not return_path:
+            return course
+        result = dict(course)
+        result["return_path"] = return_path
+        result["return_steps"] = extract_steps(route)
+        return result
+    except Exception:
+        return course
 
 
 def make_roundtrip(course: dict, with_steps: bool = True) -> dict:

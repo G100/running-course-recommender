@@ -17,19 +17,22 @@ from typing import List, Literal, Optional
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, field_validator
+from dotenv import load_dotenv
 
 from ..data_collection.add_course import add_course as register_course_full
 from ..data_collection.refresh_route import refresh_course_in_db
 from ..recommend.companion import COMPANIONS, companion_options
 from ..recommend.environment import environment_context_map
 from ..recommend.freshness import stale_courses, stamp_verified
-from ..recommend.generate_live import generate_loop_course
+from ..recommend.generate_live import generate_loop_candidates
 from ..recommend.location import filter_nearby
 from ..recommend.nl_keywords import extract_tags
 from ..recommend.profile import purposes_for, resolve_target_distance_km
-from ..recommend.route_type import apply_route_type
-from ..recommend.score import recommend, score_course
+from ..recommend.route_type import apply_route_type, attach_actual_return_path
+from ..recommend.score import recommend
 from ..recommend.trim import truncate_course
+
+load_dotenv()
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 MAIN_DB_PATH = os.path.join(DATA_DIR, "courses.json")
@@ -203,11 +206,18 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
     candidates = [apply_route_type(c, req.route_type, with_steps=False) for c in candidates]
 
     def trim_if_needed(course: dict) -> dict:
+        # 생성된 순환 루프를 단순 거리 절단하면 마지막 복귀 구간이 잘려 열린 코스가 된다.
+        if course.get("source") == "live_generated" and course.get("route_type") == "roundtrip":
+            return course
         if target_km:
             return truncate_course(course, target_km)
         return course
 
-    if not has_location or candidates:
+    # 현재 위치에서 왕복을 요청하면 저장된 편도 코스를 되짚지 않고,
+    # 가상 꼭짓점 + OSM 스냅 + Tmap passList로 새 순환 코스를 만든다.
+    prefer_live_loop = has_location and req.route_type == "roundtrip"
+
+    if (not has_location or candidates) and not prefer_live_loop:
         env_context_map = build_env_context_map(candidates, req.use_live_environment)
         ranked = recommend(candidates, user, top_n=req.top_n, env_context_map=env_context_map)
 
@@ -219,29 +229,84 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
         # 턴바이턴 위치 계산은 결과로 나갈 코스에만 한다
         return {
             "results": [
-                {"course": trim_if_needed(apply_route_type(originals[c["id"]], req.route_type)), "score": round(s, 4)}
+                {
+                    "course": trim_if_needed(
+                        apply_route_type(
+                            attach_actual_return_path(originals[c["id"]])
+                            if req.route_type == "roundtrip" else originals[c["id"]],
+                            req.route_type,
+                        )
+                    ),
+                    "score": round(s, 4),
+                }
                 for c, s in ranked
             ],
             "source": "db",
         }
 
-    # 현위치 근처에 등록된 코스가 없음 -> 그 자리에서 실제 데이터로 생성
+    # 현재 위치 왕복 요청은 서로 다른 경유지 배치로 여러 루프를 만든 뒤 개인화 점수로 정렬한다.
     generate_km = target_km or 3.0
     try:
-        generated = generate_loop_course(req.current_lat, req.current_lng, generate_km, tags, route_type=req.route_type)
+        generated_candidates = generate_loop_candidates(
+            req.current_lat, req.current_lng, generate_km, tags, route_type=req.route_type
+        )
     except ValueError as e:
+        if prefer_live_loop and candidates:
+            # 실시간 외부 API가 일시적으로 실패하면 기존 DB 추천은 계속 제공한다.
+            env_context_map = build_env_context_map(candidates, req.use_live_environment)
+            ranked = recommend(candidates, user, top_n=req.top_n, env_context_map=env_context_map)
+            return {
+                "results": [
+                    {
+                        "course": trim_if_needed(
+                            apply_route_type(
+                                attach_actual_return_path(originals[c["id"]]), req.route_type
+                            )
+                        ),
+                        "score": round(s, 4),
+                    }
+                    for c, s in ranked
+                ],
+                "source": "db",
+            }
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
+        if prefer_live_loop and candidates:
+            env_context_map = build_env_context_map(candidates, req.use_live_environment)
+            ranked = recommend(candidates, user, top_n=req.top_n, env_context_map=env_context_map)
+            return {
+                "results": [
+                    {
+                        "course": trim_if_needed(
+                            apply_route_type(
+                                attach_actual_return_path(originals[c["id"]]), req.route_type
+                            )
+                        ),
+                        "score": round(s, 4),
+                    }
+                    for c, s in ranked
+                ],
+                "source": "db",
+            }
         # 키 미설정으로 코스 생성이 불가능한 상태. 500으로 삼키면 받는 쪽이 원인을 알 수 없다.
         raise HTTPException(
             status_code=503,
             detail=f"{e} .env.example을 .env로 복사해 키를 채운 뒤 서버를 다시 시작하세요.",
         )
 
-    background_tasks.add_task(register_in_background, generated)
-
-    score = score_course(generated, user)
+    generated_env_context_map = build_env_context_map(generated_candidates, req.use_live_environment)
+    ranked = recommend(
+        generated_candidates,
+        user,
+        top_n=req.top_n,
+        env_context_map=generated_env_context_map,
+    )
+    for course, _ in ranked:
+        background_tasks.add_task(register_in_background, course)
     return {
-        "results": [{"course": trim_if_needed(generated), "score": round(score, 4)}],
+        "results": [
+            {"course": trim_if_needed(course), "score": round(score, 4)}
+            for course, score in ranked
+        ],
         "source": "generated",
     }

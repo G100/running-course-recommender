@@ -85,3 +85,30 @@ def test_distance_match_penalizes_shorter_courses():
     close = distance_match({"distance_km": 4.5}, user)
     far = distance_match({"distance_km": 1.0}, user)
     assert 0 < far < close < 1.0
+
+
+def test_generated_roundtrip_distance_score_prefers_target_length():
+    user = {"preferred_distance_km": 5.0}
+    exact = {"source": "live_generated", "route_type": "roundtrip", "distance_km": 5.0}
+    over = {"source": "live_generated", "route_type": "roundtrip", "distance_km": 5.5}
+
+    assert distance_match(exact, user) > distance_match(over, user)
+
+
+def test_generated_loop_ranking_changes_with_elevation_preference():
+    flat = {
+        "id": "flat-loop", "source": "live_generated", "route_type": "roundtrip",
+        "distance_km": 5.0, "elevation_gain_m": 20, "safety_score": 0.7,
+        "traffic_signal_count": 0, "tags": [],
+    }
+    hilly = {**flat, "id": "hilly-loop", "elevation_gain_m": 150}
+
+    low_top = recommend([flat, hilly], {
+        "preferred_distance_km": 5.0, "elevation_preference": "low", "environment_tags": set(),
+    }, top_n=1)[0][0]
+    high_top = recommend([flat, hilly], {
+        "preferred_distance_km": 5.0, "elevation_preference": "high", "environment_tags": set(),
+    }, top_n=1)[0][0]
+
+    assert low_top["id"] == "flat-loop"
+    assert high_top["id"] == "hilly-loop"

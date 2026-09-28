@@ -1,4 +1,5 @@
-from src.recommend.route_type import apply_route_type, make_roundtrip, mark_oneway
+from src.recommend import route_type
+from src.recommend.route_type import apply_route_type, attach_actual_return_path, make_roundtrip, mark_oneway
 
 COURSE = {
     "id": "c1",
@@ -72,3 +73,19 @@ def test_mark_oneway_leaves_path_untouched():
 def test_apply_route_type_dispatches():
     assert apply_route_type(COURSE, "roundtrip")["distance_km"] == 6.0
     assert apply_route_type(COURSE, "oneway")["distance_km"] == 3.0
+
+
+def test_attach_actual_return_path_uses_tmap_route(monkeypatch):
+    monkeypatch.setattr(
+        route_type,
+        "get_route",
+        lambda start, end, **kwargs: {"features": [
+            {"geometry": {"type": "LineString", "coordinates": [
+                [start[0], start[1]], [127.7005, 34.71], [end[0], end[1]],
+            ]}}
+        ]},
+    )
+
+    result = attach_actual_return_path(COURSE)
+
+    assert result["return_path"] == [[34.72, 127.7], [34.71, 127.7005], [34.7, 127.7]]
