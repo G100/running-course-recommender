@@ -32,10 +32,14 @@ def isolated_course_db(tmp_path, monkeypatch):
 def no_outbound_requests(monkeypatch):
     """외부 호출은 기본적으로 막는다. 필요한 테스트는 각자 상위 함수를 monkeypatch 한다."""
     def blocked(*args, **kwargs):
-        raise RuntimeError("테스트에서 외부 API를 호출했습니다. 해당 함수를 monkeypatch 하세요.")
+        # 실제 네트워크 장애와 같은 예외로 막아야 코드의 장애 대응(폴백) 경로가 그대로 검증된다
+        raise requests.ConnectionError("테스트에서 외부 API를 호출했습니다. 해당 함수를 monkeypatch 하세요.")
 
     for name in ("get", "post", "request"):
         monkeypatch.setattr(requests, name, blocked)
+    # 한 테스트의 Overpass 장애 쿨다운이 다음 테스트로 새지 않게
+    from src.data_collection import osm_overpass
+    monkeypatch.setattr(osm_overpass, "_retry_after", 0.0)
 
 
 @pytest.fixture
