@@ -42,6 +42,8 @@ def distance_match(course: dict, user: dict) -> float:
     if not preferred:
         return 0.5
     actual = course.get("distance_km", 0)
+    if course.get("source") == "live_generated" and course.get("route_type") == "roundtrip":
+        return _decay(abs(actual - preferred), tolerance=preferred * 0.3 + 0.5)
     if actual >= preferred:
         return 1.0
     return _decay(preferred - actual, tolerance=preferred * 0.3 + 0.5)

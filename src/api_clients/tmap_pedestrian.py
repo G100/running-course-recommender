@@ -13,8 +13,13 @@ import requests
 PEDESTRIAN_URL = "https://apis.openapi.sk.com/tmap/routes/pedestrian"
 
 
-def get_route(start: tuple, end: tuple, start_name: str = "", end_name: str = "") -> dict:
-    """start/end = (lng, lat). GeoJSON FeatureCollection 원본 응답 반환."""
+def get_route(start: tuple, end: tuple, start_name: str = "", end_name: str = "",
+              waypoints: list[tuple] | None = None) -> dict:
+    """start/end = (lng, lat), waypoints = [(lng, lat), ...].
+
+    경유지는 Tmap의 passList 형식으로 전달한다. 시작점과 끝점을 같게 하고
+    경유지를 넣으면 각 구간을 실제 보행로로 연결한 순환 경로를 받을 수 있다.
+    """
     app_key = os.environ.get("TMAP_APP_KEY")
     if not app_key:
         raise RuntimeError("TMAP_APP_KEY 환경변수가 설정되지 않았습니다.")
@@ -24,6 +29,8 @@ def get_route(start: tuple, end: tuple, start_name: str = "", end_name: str = ""
         "startX": str(start[0]), "startY": str(start[1]), "startName": start_name or "출발지",
         "endX": str(end[0]), "endY": str(end[1]), "endName": end_name or "도착지",
     }
+    if waypoints:
+        body["passList"] = "_".join(f"{lng},{lat}" for lng, lat in waypoints)
     resp = requests.post(PEDESTRIAN_URL, params={"version": 1}, headers=headers, json=body, timeout=15)
     resp.raise_for_status()
     return resp.json()

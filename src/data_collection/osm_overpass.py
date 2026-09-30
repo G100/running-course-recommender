@@ -5,11 +5,45 @@
 """
 import argparse
 import json
+import logging
+import threading
+import time
 
 import requests
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 HEADERS = {"User-Agent": "running-course-recommender/0.1 (school project)"}
+OVERPASS_COOLDOWN_SECONDS = 300
+_retry_after = 0.0
+_request_lock = threading.Lock()
+logger = logging.getLogger(__name__)
+
+
+class OverpassUnavailable(RuntimeError):
+    pass
+
+
+def post_overpass_query(query: str, timeout: int = 30):
+    """Send a shared Overpass request and pause all callers after a transient failure."""
+    global _retry_after
+    with _request_lock:
+        if time.monotonic() < _retry_after:
+            raise OverpassUnavailable("Overpass cooldown is active")
+        try:
+            response = requests.post(
+                OVERPASS_URL,
+                data={"data": query},
+                headers=HEADERS,
+                timeout=timeout,
+            )
+            response.raise_for_status()
+        except requests.RequestException as error:
+            status = getattr(getattr(error, "response", None), "status_code", None)
+            if status is None or status == 429 or status >= 500:
+                _retry_after = time.monotonic() + OVERPASS_COOLDOWN_SECONDS
+            raise OverpassUnavailable(str(error)) from error
+        _retry_after = 0.0
+        return response
 
 
 def build_query(bbox: str) -> str:
@@ -30,8 +64,20 @@ def build_query(bbox: str) -> str:
 
 def fetch_osm_features(bbox: str, timeout: int = 60) -> dict:
     query = build_query(bbox)
-    resp = requests.post(OVERPASS_URL, data={"data": query}, headers=HEADERS, timeout=timeout)
-    resp.raise_for_status()
+    try:
+        resp = post_overpass_query(query, timeout=timeout)
+    except OverpassUnavailable as error:
+        logger.debug("OSM 보강을 보류하고 미보강 상태로 코스를 저장합니다: %s", error)
+        return {
+            "bbox": bbox,
+            "traffic_signal_count": 0,
+            "green_way_count": 0,
+            "coastline_way_count": 0,
+            "traffic_signals": [],
+            "green_areas": [],
+            "coastline": [],
+            "osm_available": False,
+        }
     elements = resp.json().get("elements", [])
 
     traffic_signals = [e for e in elements if e.get("tags", {}).get("highway") == "traffic_signals"]
@@ -51,6 +97,7 @@ def fetch_osm_features(bbox: str, timeout: int = 60) -> dict:
         "traffic_signals": traffic_signals,
         "green_areas": green,
         "coastline": coastline,
+        "osm_available": True,
     }
 
 
