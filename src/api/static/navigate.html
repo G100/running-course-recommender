@@ -143,6 +143,21 @@
   .bottom-bar .eta{ font-family:"IBM Plex Mono",monospace; font-size:17px; font-weight:600; font-variant-numeric:tabular-nums; }
   .bottom-bar .sub{ font-size:11px; color:#9FB0A6; margin-top:1px; font-variant-numeric:tabular-nums; }
 
+  .rate-card{ position:absolute; left:14px; right:14px; bottom:96px; z-index:6; background:#fff; border-radius:16px;
+    padding:14px 16px; box-shadow:0 8px 28px rgba(0,0,0,.22); text-align:center; }
+  .rate-q{ font-weight:800; font-size:15px; margin-bottom:6px; }
+  .stars{ display:flex; justify-content:center; gap:4px; }
+  .stars button{ border:0; background:none; font-size:30px; line-height:1; color:#d6d9df; cursor:pointer; padding:2px; }
+  .stars button.on{ color:#F5A623; }
+  .stars button:focus-visible{ outline:2px solid #1A6FE0; border-radius:6px; }
+  .rate-note{ font-size:12px; color:#6b7280; margin-top:6px; }
+  .taste{ margin-top:14px; max-width:600px; font-size:13px; }
+  .taste-head{ font-weight:800; margin-bottom:6px; }
+  .taste-head span{ font-weight:500; color:var(--muted); font-size:12px; }
+  .taste ol{ margin:0; padding-left:18px; display:grid; gap:3px; }
+  .taste .up{ color:#16794A; font-variant-numeric:tabular-nums; }
+  .taste .down{ color:#B03030; font-variant-numeric:tabular-nums; }
+  .taste-foot{ font-size:11.5px; color:var(--muted); margin:6px 0 0; }
   .arrived-badge{
     position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:1201;
     background:var(--ink); color:var(--paper); padding:16px 26px; border-radius:14px;
@@ -271,9 +286,23 @@
         </div>
 
         <div class="arrived-badge" id="arrivedBadge" hidden>🏁 도착!</div>
+
+        <div class="rate-card" id="rateCard" hidden>
+          <div class="rate-q">이 코스 어땠나요?</div>
+          <div class="stars" id="stars">
+            <button data-r="1" aria-label="1점">★</button><button data-r="2" aria-label="2점">★</button><button data-r="3" aria-label="3점">★</button><button data-r="4" aria-label="4점">★</button><button data-r="5" aria-label="5점">★</button>
+          </div>
+          <div class="rate-note" id="rateNote">평가할수록 다음 추천이 내 취향에 맞춰집니다</div>
+        </div>
       </div>
 
       <div class="envbar" id="envbar" hidden></div>
+
+      <section class="taste" id="tastePanel" hidden>
+        <div class="taste-head">내 취향 <span id="tasteCount"></span></div>
+        <ol id="tasteList"></ol>
+        <p class="taste-foot">러닝 후 평가로 학습한 결과입니다. 숫자는 처음 기준보다 몇 % 더(덜) 중시하게 됐는지입니다.</p>
+      </section>
     </div>
   </div>
   <footer>추천 점수는 score.py 가중치 그대로 서버에서 계산 · 경로와 턴바이턴 안내: Tmap API 실제 응답 · 지도: MapLibre + OpenFreeMap(OSM) 3D · 음성: 브라우저 내장 합성</footer>
@@ -430,6 +459,11 @@ function drawCourse(course){
     attributionControl: { compact: true },
   });
 
+  new maplibregl.Marker({ color: '#16794A' }).setLngLat(coords[0]).addTo(map);
+  new maplibregl.Marker({ color: '#B03030' }).setLngLat(coords[coords.length-1]).addTo(map);
+  runnerOverlay = new maplibregl.Marker({ element: markerEl(RUNNER_ICON_URL, 26) })
+    .setLngLat(coords[0]).addTo(map);
+
   map.on('load', () => {
     map.addSource('route', {
       type: 'geojson',
@@ -455,10 +489,6 @@ function drawCourse(course){
       },
     });
 
-    new maplibregl.Marker({ color: '#16794A' }).setLngLat(coords[0]).addTo(map);
-    new maplibregl.Marker({ color: '#B03030' }).setLngLat(coords[coords.length-1]).addTo(map);
-    runnerOverlay = new maplibregl.Marker({ element: markerEl(RUNNER_ICON_URL, 26) })
-      .setLngLat(coords[0]).addTo(map);
 
     const bounds = coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
     map.fitBounds(bounds, { padding: 46, duration: 0 });
@@ -503,6 +533,7 @@ function nearestProgressOnPath(latlng, path, cum){
 }
 
 function enterNavMode(){
+  document.getElementById('rateCard').hidden = true;
   clearInterval(animTimer);
   if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
   document.getElementById('routeSheet').hidden = true;
@@ -517,9 +548,16 @@ function enterNavMode(){
 let lastNavPos = null;
 
 function updateProgressUI(lat, lng, distanceSoFarM, totalM, locatedSteps, paceMinPerKm){
-  if (!runnerOverlay || !map) return false;
-  runnerOverlay.setLngLat([lng, lat]);
+  // 지도 타일이 아직 안 떴어도(느린 폰 네트워크 등) 안내·남은 거리·도착·음성은 계속 돌아야 한다.
+  // 예전엔 여기서 바로 return해서, 지도가 늦으면 내비게이션 전체가 조용히 멈췄다.
+  if (runnerOverlay) runnerOverlay.setLngLat([lng, lat]);
+  if (map) moveNavCamera(lat, lng);
 
+  updateTurnBanner(locatedSteps, distanceSoFarM);
+  return updateEtaAndArrival(distanceSoFarM, totalM, paceMinPerKm);
+}
+
+function moveNavCamera(lat, lng){
   // 내비게이션 카메라: 진행 방향이 항상 화면 위쪽을 향하도록 지도를 돌린다(heading-up).
   // 지도를 북쪽 고정으로 두면 "좌회전"이 화면에서 오른쪽으로 보이는 일이 생긴다.
   const camera = { center: [lng, lat], pitch: NAV_PITCH, zoom: NAV_ZOOM, duration: 380 };
@@ -528,8 +566,9 @@ function updateProgressUI(lat, lng, distanceSoFarM, totalM, locatedSteps, paceMi
   }
   if (!lastNavPos || haversine(lastNavPos, [lat, lng]) > 1) lastNavPos = [lat, lng];
   map.easeTo(camera);
+}
 
-  updateTurnBanner(locatedSteps, distanceSoFarM);
+function updateEtaAndArrival(distanceSoFarM, totalM, paceMinPerKm){
 
   const remainKm = Math.max(0, (totalM - distanceSoFarM) / 1000);
   document.getElementById('etaTime').textContent = fmtKoreanTime(new Date(Date.now() + remainKm * paceMinPerKm * 60000));
@@ -540,7 +579,8 @@ function updateProgressUI(lat, lng, distanceSoFarM, totalM, locatedSteps, paceMi
     document.getElementById('turnSecondary').hidden = true;
     document.getElementById('arrivedBadge').hidden = false;
     speak('목적지에 도착했습니다. 수고하셨습니다.', true);
-    document.getElementById('status').textContent = '도착! 실제 서비스라면 여기서 평점·완주여부 피드백을 수집합니다.';
+    showRateCard();
+    document.getElementById('status').textContent = '도착! 아래에서 코스를 평가하면 다음 추천에 반영됩니다.';
     document.getElementById('status').classList.remove('live');
     return true;
   }
@@ -676,6 +716,7 @@ document.getElementById('goBtn').addEventListener('click', async () => {
     elevation_preference: elev,
     environment_tags: tags,
     route_type: routeType,
+    user_id: USER_ID,
     ...(destination ? { destination } : {}),
     current_lat: selectedLoc.lat,
     current_lng: selectedLoc.lng,
@@ -718,6 +759,67 @@ document.getElementById('goBtn').addEventListener('click', async () => {
 });
 
 // 코스를 받기 전에는 지도를 만들지 않는다 — drawCourse가 경로에 맞춰 새로 띄운다.
+
+// ── 개인화: 러닝 후 만족도로 이 사람의 가중치를 학습한다 ──
+// 로그인이 없는 데모라 브라우저마다 익명 id를 만들어 기억한다. 실제 앱에선 계정 id를 쓴다.
+const USER_ID = (() => {
+  try {
+    let id = localStorage.getItem('runner_user_id');
+    if (!id){ id = 'demo-' + Math.random().toString(36).slice(2, 10); localStorage.setItem('runner_user_id', id); }
+    return id;
+  } catch (e) { return 'demo-anon'; }
+})();
+
+function showRateCard(){
+  const card = document.getElementById('rateCard');
+  card.hidden = false;
+  card.querySelectorAll('button').forEach(b => b.classList.remove('on'));
+  document.getElementById('rateNote').textContent = '평가할수록 다음 추천이 내 취향에 맞춰집니다';
+}
+
+document.getElementById('stars').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-r]');
+  const course = window._currentCourse;
+  if (!btn || !course) return;
+  const rating = Number(btn.dataset.r);
+  document.querySelectorAll('#stars button').forEach(b => b.classList.toggle('on', Number(b.dataset.r) <= rating));
+  const note = document.getElementById('rateNote');
+  try {
+    const res = await fetch('/feedback', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: USER_ID, course_id: course.id, rating }),
+    });
+    const body = await res.json();
+    if (!res.ok) { note.textContent = body.detail || '평가를 저장하지 못했습니다'; return; }
+    const top = body.explanation[0];
+    // 평가가 쌓여 뚜렷한 취향이 생겼을 때만 "~를 중시한다"고 말한다. 애매하면 단정하지 않는다.
+    note.textContent = rating >= 4
+      ? (top.preference >= 0.1 ? `반영했습니다 · "${top.label}"을(를) 중시하시는 것 같아요` : '반영했습니다 · 이런 코스를 더 추천할게요')
+      : '반영했습니다 · 다음 추천에서 이런 코스는 덜 나옵니다';
+    renderTaste(body);
+  } catch (err) {
+    note.textContent = '서버에 연결하지 못했습니다';
+  }
+});
+
+function renderTaste(profile){
+  if (!profile || !profile.n_feedback) return;
+  document.getElementById('tastePanel').hidden = false;
+  document.getElementById('tasteCount').textContent = `· 평가 ${profile.n_feedback}회`;
+  const list = document.getElementById('tasteList');
+  list.innerHTML = '';
+  profile.explanation.forEach(row => {
+    const li = document.createElement('li');
+    const delta = document.createElement('span');
+    const pct = Math.round((Math.exp(row.preference) - 1) * 100);  // 기본 대비 몇 % 더/덜 중시
+    delta.className = pct >= 3 ? 'up' : (pct <= -3 ? 'down' : '');
+    delta.textContent = Math.abs(pct) < 3 ? ' · 변화 없음' : ` ${pct > 0 ? '+' : ''}${pct}%`;
+    li.append(row.label, delta);
+    list.appendChild(li);
+  });
+}
+
+fetch(`/profile/${encodeURIComponent(USER_ID)}`).then(r => r.ok ? r.json() : null).then(renderTaste).catch(() => {});
 </script>
 </body>
 </html>

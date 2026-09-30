@@ -16,7 +16,7 @@ from typing import List, Literal, Optional
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from dotenv import load_dotenv
 
 from ..data_collection.add_course import add_course as register_course_full
@@ -31,7 +31,9 @@ from ..recommend.nl_keywords import extract_tags
 from ..recommend.profile import purposes_for, resolve_target_distance_km
 from ..data_collection.enrich import haversine_m
 from ..recommend.route_type import apply_route_type, attach_actual_return_path, is_closed_loop
-from ..recommend.score import recommend
+from ..recommend.personalize import (explain, learn, load_profile, new_profile, recalled, remember_recommendation,
+                                     save_profile, weights_for)
+from ..recommend.score import component_scores, recommend
 from ..recommend.trim import truncate_course
 
 load_dotenv()
@@ -143,6 +145,7 @@ class RecommendRequest(BaseModel):
     current_lng: Optional[float] = None
     max_distance_km: float = 5.0
     route_type: Literal["roundtrip", "loop", "oneway"] = "roundtrip"  # 왕복 / 순환 / 편도
+    user_id: Optional[str] = None           # 주면 이 사람의 만족도로 학습한 가중치로 추천한다
     destination: Optional[str] = None       # 목적지 장소 이름 (예: "오동도, 여수")
     destination_lat: Optional[float] = None  # 장소 이름 대신 좌표로 지정할 때
     destination_lng: Optional[float] = None
@@ -161,6 +164,13 @@ class RecommendRequest(BaseModel):
 class CourseResult(BaseModel):
     course: dict
     score: float
+    score_breakdown: Optional[dict] = None  # 항목별 적합도 0~1 (왜 이 코스인지)
+
+
+class FeedbackRequest(BaseModel):
+    user_id: str
+    course_id: str
+    rating: int = Field(ge=1, le=5, description="러닝 후 만족도 1~5")
 
 
 class RecommendResponse(BaseModel):
@@ -180,6 +190,44 @@ def onboarding_purposes(experience_level: str = "beginner"):
 @app.get("/onboarding/companions")
 def onboarding_companions():
     return {"companions": companion_options()}
+
+
+@app.post("/feedback")
+def post_feedback(req: FeedbackRequest):
+    """러닝 후 만족도를 받아 그 사람의 가중치를 학습한다.
+
+    무엇 때문에 추천했는지(항목별 적합도)는 추천할 때 남겨 두었으므로, 앱은 코스 id와
+    점수만 보내면 된다.
+    """
+    profile = load_profile(req.user_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="추천을 받은 적 없는 사용자입니다. 먼저 user_id를 넣어 추천을 받아야 합니다.")
+    remembered = recalled(profile, req.course_id)
+    if remembered is None:
+        raise HTTPException(status_code=404, detail="이 사용자에게 최근 추천된 코스가 아닙니다.")
+    scores, baseline = remembered
+    learn(profile, scores, req.rating, baseline)
+    save_profile(profile)
+    return _profile_view(profile)
+
+
+@app.get("/profile/{user_id}")
+def get_profile(user_id: str):
+    """학습된 취향. 어떤 요소를 기본값보다 더/덜 중시하게 됐는지 설명과 함께."""
+    profile = load_profile(user_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="프로필이 없습니다.")
+    return _profile_view(profile)
+
+
+def _profile_view(profile: dict) -> dict:
+    return {
+        "user_id": profile["user_id"],
+        "n_feedback": profile["n_feedback"],
+        "survey": profile.get("survey", {}),
+        "weights": {k: round(v, 3) for k, v in profile["weights"].items()},
+        "explanation": explain(profile),
+    }
 
 
 @app.get("/health")
@@ -212,13 +260,58 @@ def navigate_page():
     return HTMLResponse(html)
 
 
-@app.post("/recommend", response_model=RecommendResponse)
-def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
+def _user_from_request(req) -> dict:
     user = req.model_dump()
     tags = set(user.get("environment_tags") or [])
     if req.text:
         tags |= extract_tags(req.text)
     user["environment_tags"] = tags
+    return user
+
+
+SURVEY_FIELDS = ("experience_level", "pace_min_per_km", "purpose", "companion",
+                 "elevation_preference", "environment_tags", "preferred_distance_km")
+
+
+@app.post("/recommend", response_model=RecommendResponse)
+def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
+    """user_id를 주면 그 사람의 학습된 가중치로 추천하고, 평가를 받을 수 있게 추천 근거를 남긴다."""
+    user = _user_from_request(req)
+
+    profile = None
+    if req.user_id:
+        profile = load_profile(req.user_id)
+        if profile is None:
+            # 첫 요청의 온보딩 답변이 곧 초기 설문이다
+            survey = {k: user.get(k) for k in SURVEY_FIELDS if user.get(k) not in (None, [], set())}
+            survey["environment_tags"] = sorted(survey.get("environment_tags", []))
+            profile = new_profile(req.user_id, survey=survey)
+    weights = weights_for(profile, req.use_live_environment) if profile else None
+
+    response = _recommend(req, background_tasks, user, weights)
+
+    # 항목별 적합도를 같이 내려준다: 앱은 "왜 이 코스인지" 보여줄 수 있고,
+    # 서버는 나중에 만족도 평가가 오면 이걸로 이 사람의 가중치를 학습한다
+    breakdowns = []
+    for result in response["results"]:
+        course = result["course"]
+        env = environment_context_map([course]).get(course["id"]) if req.use_live_environment else None
+        breakdown = component_scores(course, user, env)
+        result["score_breakdown"] = {k: round(v, 3) for k, v in breakdown.items()}
+        breakdowns.append((course["id"], breakdown))
+
+    if profile is not None:
+        for course_id, breakdown in breakdowns:
+            # 비교 기준은 "이 코스 말고 같이 보여준 다른 코스들"의 평균
+            others = [b for cid, b in breakdowns if cid != course_id]
+            baseline = {k: sum(o[k] for o in others) / len(others) for k in breakdown} if others else None
+            remember_recommendation(profile, course_id, breakdown, baseline)
+        save_profile(profile)
+    return response
+
+
+def _recommend(req: RecommendRequest, background_tasks: BackgroundTasks, user: dict, weights: Optional[dict]):
+    tags = user["environment_tags"]
     # "30분 뛸래"처럼 시간만 준 경우 페이스로 거리를 환산해 이후 단계 전부에서 같은 값을 쓴다
     target_km = resolve_target_distance_km(user)
 
@@ -279,7 +372,7 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
 
     if (not has_location or candidates) and not prefer_live_loop:
         env_context_map = build_env_context_map(candidates, req.use_live_environment)
-        ranked = recommend(candidates, user, top_n=req.top_n, env_context_map=env_context_map)
+        ranked = recommend(candidates, user, top_n=req.top_n, env_context_map=env_context_map, weights=weights)
 
         # 저장된 경로는 즉시 주되, 오래된 건 뒤에서 갱신해 다음 사람이 최신 경로를 받게 한다.
         # 한 요청이 Tmap 할당량을 몰아 쓰지 않도록 한 번에 한 개만 갱신한다.
@@ -314,7 +407,7 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
         if prefer_live_loop and candidates:
             # 실시간 외부 API가 일시적으로 실패하면 기존 DB 추천은 계속 제공한다.
             env_context_map = build_env_context_map(candidates, req.use_live_environment)
-            ranked = recommend(candidates, user, top_n=req.top_n, env_context_map=env_context_map)
+            ranked = recommend(candidates, user, top_n=req.top_n, env_context_map=env_context_map, weights=weights)
             return {
                 "results": [
                     {
@@ -333,7 +426,7 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
     except RuntimeError as e:
         if prefer_live_loop and candidates:
             env_context_map = build_env_context_map(candidates, req.use_live_environment)
-            ranked = recommend(candidates, user, top_n=req.top_n, env_context_map=env_context_map)
+            ranked = recommend(candidates, user, top_n=req.top_n, env_context_map=env_context_map, weights=weights)
             return {
                 "results": [
                     {
@@ -360,6 +453,7 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
         user,
         top_n=req.top_n,
         env_context_map=generated_env_context_map,
+        weights=weights,
     )
     for course, _ in ranked:
         background_tasks.add_task(register_in_background, course)

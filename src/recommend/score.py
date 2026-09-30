@@ -84,24 +84,30 @@ def tag_match(course: dict, user: dict) -> float:
     return len(overlap) / len(user_tags)
 
 
-def score_course(course: dict, user: dict, weights: dict = None, env_context: dict = None) -> float:
-    if weights is None:
-        weights = DEFAULT_WEIGHTS_WITH_ENV if env_context is not None else DEFAULT_WEIGHTS
-    weights = tune_weights(weights, user.get("purpose"))
-    weights = tune_for_companion(weights, user.get("companion"))
+def component_scores(course: dict, user: dict, env_context: dict = None) -> dict:
+    """항목별 적합도(각 0~1). 가중치를 곱하기 전 값이라, 이 코스가 무엇 때문에 추천됐는지
+    보여줄 때와 만족도로 사용자 가중치를 학습할 때 쓴다."""
+    from .environment import environment_score
 
-    scores = {
+    return {
         "distance": distance_match(course, user),
         "elevation": elevation_match(course, user),
         "safety": safety_match(course, user),
         "signal_free": signal_free_match(course, user),
         "tag_match": tag_match(course, user),
         "time_fit": time_fit_match(course, user),
+        "environment": environment_score(env_context or {}),
     }
-    if "environment" in weights:
-        from .environment import environment_score
-        scores["environment"] = environment_score(env_context or {})
 
+
+def score_course(course: dict, user: dict, weights: dict = None, env_context: dict = None) -> float:
+    if weights is None:
+        weights = DEFAULT_WEIGHTS_WITH_ENV if env_context is not None else DEFAULT_WEIGHTS
+    # 사용자별로 학습된 가중치가 오더라도 목적·동반자에 따른 조정은 그 위에 얹는다
+    weights = tune_weights(weights, user.get("purpose"))
+    weights = tune_for_companion(weights, user.get("companion"))
+
+    scores = component_scores(course, user, env_context)
     return sum(scores[k] * weights[k] for k in weights)
 
 

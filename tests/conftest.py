@@ -22,6 +22,9 @@ def isolated_course_db(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "MAIN_DB_PATH", str(copy))
     monkeypatch.setattr(refresh_route, "DB_PATH", str(copy))
     monkeypatch.setattr(main, "_db_cache", {"key": None, "courses": None})
+    # 사용자 프로필도 테스트마다 빈 파일에서 시작한다
+    from src.recommend import personalize
+    monkeypatch.setattr(personalize, "PROFILES_PATH", str(tmp_path / "user_profiles.json"))
     yield copy
 
 
