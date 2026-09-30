@@ -4,8 +4,11 @@ DB에 미리 저장된 코스가 아니라, 요청이 들어온 그 순간 사�
 실제 도로/지형 데이터를 조회해 코스를 즉석에서 만든다.
 
 방식: 목표 둘레로 가상의 다각형 꼭짓점을 만들고, 각 꼭짓점을 OSM의 공원·보행로로
-스냅한 뒤 Tmap passList에 넣는다. route_type="roundtrip"이면 출발점과 도착점을
+스냅한 뒤 Tmap passList에 넣는다. route_type="loop"이면 출발점과 도착점을
 같게 하여 경유지를 순서대로 통과하는 순환 코스를 만든다.
+
+왕복(roundtrip)은 여기서 만들지 않는다 — 갔던 길을 되짚는 것이라 편도 코스에
+실제 복귀 경로를 붙이는 route_type.py 쪽이 담당한다.
 
 한계 (검증 완료 사항):
 - 요청 1건당 Overpass + Tmap + 고도 API를 순차 호출하므로 응답에 수 초 소요.
@@ -197,14 +200,14 @@ def sample_elevation_gain(path: list, n: int = 20) -> float:
 
 
 def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags: set,
-                         route_type: str = "roundtrip", angle_offset_deg: float | None = None,
+                         route_type: str = "loop", angle_offset_deg: float | None = None,
                          snap_to_osm: bool = True, radius_scale: float = 1.0) -> dict:
     """Generate one Tmap course candidate for a waypoint polygon orientation."""
     matched_tag = next((tag for tag in TAG_TO_OSM_FILTER if tag in tags), None)
     offsets = (angle_offset_deg,) if angle_offset_deg is not None else RETRY_ANGLE_OFFSETS_DEG
 
     for offset in offsets:
-        if route_type == "roundtrip":
+        if route_type == "loop":
             vertices = virtual_vertices(
                 lat, lng, target_distance_km,
                 angle_offset_deg=offset,
@@ -224,19 +227,19 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
         full_path, distance_m = extract_path(route)
         if not full_path:
             continue
-        if route_type == "roundtrip" and has_self_intersection(full_path):
+        if route_type == "loop" and has_self_intersection(full_path):
             continue
         break
     else:
-        if route_type == "roundtrip":
+        if route_type == "loop":
             raise ValueError("Tmap 보행자 순환 경로를 찾지 못했습니다.")
         raise ValueError("Tmap 보행자 경로를 찾지 못했습니다.")
 
     steps = assign_positions(extract_steps(route), full_path)
-    offset_suffix = f"-a{offset:g}-r{radius_scale:g}" if route_type == "roundtrip" else ""
-    name_suffix = f", {offset:g}°, 반경 {radius_scale:.0%}" if route_type == "roundtrip" else ""
+    offset_suffix = f"-a{offset:g}-r{radius_scale:g}" if route_type == "loop" else ""
+    name_suffix = f", {offset:g}°, 반경 {radius_scale:.0%}" if route_type == "loop" else ""
     course_tags = [matched_tag] if matched_tag else []
-    name = f"현위치 기반 {'왕복' if route_type == 'roundtrip' else '편도'} 코스 ({matched_tag or '기본'}{name_suffix})"
+    name = f"현위치 기반 {'순환' if route_type == 'loop' else '편도'} 코스 ({matched_tag or '기본'}{name_suffix})"
 
     return {
         "id": f"generated-{lat:.4f}-{lng:.4f}-{target_distance_km}-{route_type}{offset_suffix}",
@@ -255,9 +258,9 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
 
 
 def generate_loop_candidates(lat: float, lng: float, target_distance_km: float, tags: set,
-                             route_type: str = "roundtrip") -> list[dict]:
+                             route_type: str = "loop") -> list[dict]:
     """Generate distinct orientations; OSM-snaps only the first to limit external requests."""
-    if route_type != "roundtrip":
+    if route_type != "loop":
         return [generate_loop_course(lat, lng, target_distance_km, tags, route_type)]
 
     def build(index_and_shape):

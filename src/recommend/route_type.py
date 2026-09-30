@@ -8,19 +8,19 @@ from ..api_clients.tmap_pedestrian import extract_path, extract_steps, get_route
 from ..data_collection.enrich import haversine_m
 from .step_position import assign_positions, cumulative_distances
 
-ROUTE_TYPES = ("roundtrip", "oneway")
+ROUTE_TYPES = ("roundtrip", "loop", "oneway")
 
 
 CLOSED_LOOP_TOLERANCE_M = 80
 
 
 def is_closed_loop(course: dict) -> bool:
-    """이미 출발점으로 돌아오는 코스인가.
+    """이미 출발점으로 돌아오는 순환 코스인가.
 
-    경유지로 만든 순환 코스는 그 자체로 왕복이다. 여기에 왕복 처리를 또 하면 거리와 고도가
-    두 배가 되고(6.8km 코스가 13.6km로), 동반자 상한 같은 판정이 전부 어긋난다.
+    순환 코스에 왕복 처리를 또 하면 거리와 고도가 두 배가 되고(6.8km 코스가 13.6km로),
+    동반자 상한 같은 판정이 전부 어긋난다.
     """
-    if course.get("source") == "live_generated" and course.get("route_type") == "roundtrip":
+    if course.get("route_type") == "loop":
         return True
     path = course.get("path") or []
     return len(path) >= 3 and haversine_m(path[0], path[-1]) <= CLOSED_LOOP_TOLERANCE_M
@@ -90,8 +90,11 @@ def mark_oneway(course: dict) -> dict:
 
 
 def apply_route_type(course: dict, route_type: str, with_steps: bool = True) -> dict:
-    if route_type == "roundtrip" and is_closed_loop(course):
-        return dict(course, route_type="roundtrip")
+    if is_closed_loop(course):
+        # 순환 코스는 이미 제자리로 돌아온다. 왕복이든 순환이든 손대지 않는다.
+        return dict(course, route_type="loop")
+    if route_type == "loop":
+        return dict(course, route_type="loop")
     return _apply_route_type(course, route_type, with_steps)
 
 

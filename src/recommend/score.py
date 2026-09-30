@@ -42,7 +42,8 @@ def distance_match(course: dict, user: dict) -> float:
     if not preferred:
         return 0.5
     actual = course.get("distance_km", 0)
-    if course.get("source") == "live_generated" and course.get("route_type") == "roundtrip":
+    # 순환 코스는 잘라낼 수 없다(자르면 고리가 끊긴다). 길어도 감점해야 목표 길이에 맞는 게 뽑힌다.
+    if course.get("route_type") == "loop":
         return _decay(abs(actual - preferred), tolerance=preferred * 0.3 + 0.5)
     if actual >= preferred:
         return 1.0

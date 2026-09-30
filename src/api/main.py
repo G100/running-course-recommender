@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from ..data_collection.add_course import add_course as register_course_full
 from ..data_collection.refresh_route import refresh_course_in_db
 from ..recommend.companion import COMPANIONS, companion_options
+from ..recommend.destination import course_to_destination
 from ..recommend.environment import environment_context_map
 from ..recommend.freshness import stale_courses, stamp_verified
 from ..recommend.generate_live import generate_loop_candidates
@@ -141,7 +142,10 @@ class RecommendRequest(BaseModel):
     current_lat: Optional[float] = None
     current_lng: Optional[float] = None
     max_distance_km: float = 5.0
-    route_type: Literal["roundtrip", "oneway"] = "roundtrip"
+    route_type: Literal["roundtrip", "loop", "oneway"] = "roundtrip"  # 왕복 / 순환 / 편도
+    destination: Optional[str] = None       # 목적지 장소 이름 (예: "오동도, 여수")
+    destination_lat: Optional[float] = None  # 장소 이름 대신 좌표로 지정할 때
+    destination_lng: Optional[float] = None
     companion: Optional[str] = None  # 값 목록: GET /onboarding/companions
     time_of_day: Optional[Literal["morning", "afternoon", "evening", "night"]] = None  # 생략하면 서버 시각 기준
 
@@ -229,7 +233,7 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
 
     def trim_if_needed(course: dict) -> dict:
         # 생성된 순환 루프를 단순 거리 절단하면 마지막 복귀 구간이 잘려 열린 코스가 된다.
-        if course.get("source") == "live_generated" and course.get("route_type") == "roundtrip":
+        if course.get("route_type") == "loop":
             return course
         if target_km:
             return truncate_course(course, target_km)
@@ -237,7 +241,33 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
 
     # 현재 위치에서 왕복을 요청하면 저장된 편도 코스를 되짚지 않고,
     # 가상 꼭짓점 + OSM 스냅 + Tmap passList로 새 순환 코스를 만든다.
-    prefer_live_loop = has_location and req.route_type == "roundtrip"
+    # 목적지를 지정했으면 추천이 아니라 지정이다 — 점수로 고르지 않고 거기까지 경로를 만든다.
+    if req.destination or (req.destination_lat is not None and req.destination_lng is not None):
+        if not has_location:
+            raise HTTPException(
+                status_code=400,
+                detail="목적지까지의 코스를 만들려면 현위치(current_lat, current_lng)가 필요합니다.",
+            )
+        try:
+            course = course_to_destination(
+                req.current_lat, req.current_lng, req.destination,
+                req.destination_lat, req.destination_lng, route_type=req.route_type,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=f"{e} .env에 TMAP_APP_KEY를 넣고 서버를 다시 시작하세요.")
+        return {"results": [{"course": course, "score": 1.0}], "source": "destination"}
+
+    # 순환은 갔던 길을 되짚는 왕복과 다른 코스다. 고른 대로 내보낸다.
+    wants_loop = req.route_type == "loop"
+    if wants_loop and not has_location:
+        raise HTTPException(
+            status_code=400,
+            detail="순환 코스는 그 자리에서 만들기 때문에 현위치(current_lat, current_lng)가 필요합니다.",
+        )
+
+    prefer_live_loop = wants_loop
     if prefer_live_loop:
         # 그 자리에 맞는 루프를 전에 만들어 뒀으면 다시 만들지 않는다. 생성 1건에 Tmap 3건이
         # 드는데 무료 한도가 하루 1,000건이라, 매번 만들면 하루 333회로 팀 전체가 막힌다.
@@ -274,7 +304,7 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks):
             "source": "db",
         }
 
-    # 현재 위치 왕복 요청은 서로 다른 경유지 배치로 여러 루프를 만든 뒤 개인화 점수로 정렬한다.
+    # 순환 요청은 서로 다른 경유지 배치로 여러 루프를 만든 뒤 개인화 점수로 정렬한다.
     generate_km = target_km or 3.0
     try:
         generated_candidates = generate_loop_candidates(

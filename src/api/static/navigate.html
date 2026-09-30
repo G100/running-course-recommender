@@ -48,6 +48,8 @@
 
   .go{ width:100%; padding:12px; border-radius:10px; border:none; background:var(--accent); color:var(--accent-ink); font:inherit; font-weight:700; font-size:14px; cursor:pointer; }
   .go:disabled{ opacity:.55; cursor:default; }
+  .field input[type=text]{ width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:9px;
+    font-size:13px; font-family:inherit; box-sizing:border-box; background:#fff; }
   .hint{ font-size:11.5px; color:var(--muted); line-height:1.5; border-top:1px solid var(--line); padding-top:12px; }
 
   .stage{ display:flex; flex-direction:column; align-items:center; gap:14px; min-width:0; }
@@ -192,11 +194,18 @@
       </div>
 
       <div class="field">
-        <label>왕복 / 편도</label>
+        <label>코스 형태</label>
         <div class="seg" id="routeSeg">
           <button data-v="roundtrip" class="on">왕복</button>
+          <button data-v="loop">순환</button>
           <button data-v="oneway">편도</button>
         </div>
+        <p class="hint">왕복은 갔던 길을 되짚고, 순환은 한 바퀴 돌아 제자리로 옵니다.</p>
+      </div>
+
+      <div class="field">
+        <label for="destInput">목적지 (선택)</label>
+        <input id="destInput" type="text" placeholder="예: 오동도, 여수 — 비워두면 조건으로 추천">
       </div>
 
       <div class="field">
@@ -661,11 +670,13 @@ document.getElementById('goBtn').addEventListener('click', async () => {
   const tags = [...document.querySelectorAll('#tagChips .chip.on')].map(b => b.dataset.tag);
   const elev = document.querySelector('#elevSeg button.on').dataset.v;
   const routeType = document.querySelector('#routeSeg button.on').dataset.v;
+  const destination = document.getElementById('destInput').value.trim();
   const payload = {
     preferred_distance_km: parseFloat(document.getElementById('dist').value),
     elevation_preference: elev,
     environment_tags: tags,
     route_type: routeType,
+    ...(destination ? { destination } : {}),
     current_lat: selectedLoc.lat,
     current_lng: selectedLoc.lng,
     max_distance_km: 5,
@@ -695,7 +706,8 @@ document.getElementById('goBtn').addEventListener('click', async () => {
     course._source = body.source;
     window._currentCourse = course;
     window._currentScore = score;
-    status.textContent = `${body.source === 'generated' ? '실시간 생성 완료' : 'DB 매칭 완료'} · ${elapsed}초`;
+    const sourceLabel = { generated: '실시간 생성 완료', destination: '목적지 경로 생성 완료', db: 'DB 매칭 완료' };
+    status.textContent = `${sourceLabel[body.source] || 'DB 매칭 완료'} · ${elapsed}초`;
     drawCourse(course);
     showRouteSheet(course, score);
   } catch(e){

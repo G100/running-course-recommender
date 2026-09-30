@@ -11,7 +11,7 @@ from src.api import main
 
 def _loop(cid, lat, lng, distance_km):
     return {
-        "id": cid, "name": cid, "source": "live_generated", "route_type": "roundtrip",
+        "id": cid, "name": cid, "source": "live_generated", "route_type": "loop",
         "path": [[lat, lng], [lat + 0.004, lng + 0.004], [lat, lng]],
         "distance_km": distance_km, "elevation_gain_m": 20, "safety_score": 0.7,
         "traffic_signal_count": 0, "tags": [],
@@ -20,7 +20,7 @@ def _loop(cid, lat, lng, distance_km):
 
 def _request(**kwargs):
     return main.RecommendRequest(
-        current_lat=34.0, current_lng=127.0, route_type="roundtrip",
+        current_lat=34.0, current_lng=127.0, route_type="loop",
         preferred_distance_km=5.0, use_live_environment=False, **kwargs
     )
 
