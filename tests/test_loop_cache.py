@@ -61,3 +61,34 @@ def test_open_db_course_does_not_count_as_a_loop(monkeypatch):
     }
     _, calls = _run(monkeypatch, [open_course])
     assert calls
+
+
+def test_cached_loop_without_the_requested_scenery_is_not_reused(monkeypatch):
+    """저장된 순환이 요청한 풍경이 아니면 재사용하지 않는다 — 재사용하면 필터에 걸려 결과가 0개가 된다."""
+    park_loop = dict(_loop("cached-park", 34.0, 127.0, 5.0), tags=["공원"])
+    river_loop = dict(_loop("fresh-river", 34.0, 127.0, 5.0), tags=["강변"])
+    calls = []
+    monkeypatch.setattr(main, "load_courses", lambda: [park_loop])
+    monkeypatch.setattr(main, "filter_nearby", lambda courses, lat, lng, radius: courses)
+    monkeypatch.setattr(main, "generate_loop_candidates", lambda *a, **k: calls.append(a) or [river_loop])
+
+    response = main.post_recommend(_request(environment_tags=["강변"]), BackgroundTasks())
+
+    assert calls, "풍경이 안 맞는 순환을 재사용했다"
+    assert [r["course"]["id"] for r in response["results"]] == ["fresh-river"]
+
+
+def test_no_loop_with_the_requested_scenery_is_reported_not_returned_empty(monkeypatch):
+    """요청한 풍경의 순환을 못 만들었으면 빈 목록(200)이 아니라 이유를 알려준다."""
+    import pytest
+    from fastapi import HTTPException
+
+    park_loop = dict(_loop("fresh-park", 34.0, 127.0, 5.0), tags=["공원"])
+    monkeypatch.setattr(main, "load_courses", lambda: [])
+    monkeypatch.setattr(main, "filter_nearby", lambda courses, lat, lng, radius: courses)
+    monkeypatch.setattr(main, "generate_loop_candidates", lambda *a, **k: [park_loop])
+
+    with pytest.raises(HTTPException) as error:
+        main.post_recommend(_request(environment_tags=["강변"]), BackgroundTasks())
+    assert error.value.status_code == 404
+    assert "강변" in error.value.detail

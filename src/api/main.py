@@ -34,7 +34,7 @@ from ..data_collection.enrich import haversine_m
 from ..recommend.route_type import apply_route_type, attach_actual_return_path, is_closed_loop
 from ..recommend.personalize import (explain, learn, load_profile, new_profile, recalled, remember_recommendation,
                                      save_profile, weights_for)
-from ..recommend.score import component_scores, recommend
+from ..recommend.score import component_scores, filter_by_required_tags, recommend
 from ..recommend.trim import truncate_course
 
 load_dotenv()
@@ -396,6 +396,8 @@ def _recommend(req: RecommendRequest, background_tasks: BackgroundTasks, user: d
         # 드는데 무료 한도가 하루 1,000건이라, 매번 만들면 하루 333회로 팀 전체가 막힌다.
         # 왕복 변환을 거친 코스는 편도라도 시작=끝이 되므로, 반드시 원본으로 판단한다
         cached = reusable_loops(list(originals.values()), req.current_lat, req.current_lng, target_km)
+        # 요청한 풍경이 아닌 순환은 재사용하지 않는다. 재사용하면 태그 필터에 전부 걸려 결과가 0개가 된다.
+        cached = filter_by_required_tags(cached, user)
         if cached:
             candidates, originals = cached, {c["id"]: c for c in cached}
             prefer_live_loop = False
@@ -485,8 +487,16 @@ def _recommend(req: RecommendRequest, background_tasks: BackgroundTasks, user: d
         env_context_map=generated_env_context_map,
         weights=weights,
     )
-    for course, _ in ranked:
+    for course in generated_candidates:
+        # 요청한 풍경이 아니어도 만든 코스는 저장해 둔다 — 다음에 조건이 맞는 요청에서 다시 쓴다
         background_tasks.add_task(register_in_background, course)
+    if not ranked:
+        # 만들긴 했지만 요청한 풍경을 지나는 코스가 없다. 빈 목록을 200으로 주면 앱은 이유를 모른다.
+        wanted = ", ".join(sorted(tags)) or "조건"
+        raise HTTPException(
+            status_code=404,
+            detail=f"이 주변에서는 '{wanted}'을(를) 지나는 코스를 만들지 못했습니다. 풍경 조건을 빼거나 다른 코스 형태로 시도해 보세요.",
+        )
     return {
         "results": [
             {"course": trim_if_needed(course), "score": round(score, 4)}
