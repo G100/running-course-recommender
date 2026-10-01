@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from ..api_clients.elevation import get_elevation_profile
 from ..api_clients.tmap_pedestrian import extract_path, extract_steps, get_route
+from ..data_collection import scenery
 from ..data_collection.enrich import haversine_m
 from ..data_collection.osm_overpass import OverpassUnavailable, post_overpass_query
 from .step_position import assign_positions, cumulative_distances
@@ -455,10 +456,9 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
     steps = assign_positions(raw_steps, full_path)
     offset_suffix = f"-a{offset:g}-r{radius_scale:g}" if route_type == "loop" else ""
     name_suffix = f", {offset:g}°, 반경 {radius_scale:.0%}" if route_type == "loop" else ""
-    course_tags = [matched_tag] if matched_tag else []
-    name = f"현위치 기반 {'순환' if route_type == 'loop' else '편도'} 코스 ({matched_tag or '기본'}{name_suffix})"
+    name = f"현위치 기반 {'순환' if route_type == 'loop' else '편도'} 코스 (기본{name_suffix})"
 
-    return {
+    course = {
         "id": f"generated-{lat:.4f}-{lng:.4f}-{target_distance_km}-{route_type}{offset_suffix}",
         "name": name,
         "region": "실시간 생성",
@@ -469,9 +469,19 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
         "path": full_path,
         "steps": steps,
         "route_type": route_type,
-        "tags": course_tags,
+        "tags": [],
         "source": "live_generated",
     }
+    # 풍경 태그는 요청값이 아니라 측정값으로 붙인다. "바다뷰를 요청했으니 바다뷰"라고 붙이면
+    # 바다가 안 보이는 코스가 바다뷰로 나간다. 지형 데이터가 없는 곳이면 붙이지 않고 표시만 한다.
+    measured = scenery.tags_for_path(full_path, course)
+    if measured is None:
+        course["scenery_pending"] = True
+    else:
+        course["scenery"], course["tags"] = measured
+        if course["tags"]:
+            course["name"] = name.replace("(기본", f"({'·'.join(course['tags'][:2])}")
+    return course
 
 
 def generate_loop_candidates(lat: float, lng: float, target_distance_km: float, tags: set,

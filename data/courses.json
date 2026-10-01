@@ -833,9 +833,9 @@
     "coastline_proximity": 0.993,
     "traffic_signal_count": 0,
     "tags": [
-      "숲길",
       "바다뷰",
-      "차없는길"
+      "역사문화",
+      "전망"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -1852,6 +1852,23 @@
       "cctv": 0.731,
       "nightlife": 0.959,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.582,
+      "beach": 0.0,
+      "river": 0.0,
+      "lake": 0.0,
+      "park": 0.116,
+      "forest": 0.089,
+      "footpath": 0.171,
+      "cycleway": 0.0,
+      "campus": 0.0,
+      "sports": 0.0,
+      "carfree": 0.171,
+      "bridge_run_m": 25,
+      "heritage_per_km": 3.56,
+      "viewpoints": 7,
+      "shops_per_km": 11.51
     }
   },
   {
@@ -2408,9 +2425,13 @@
     "coastline_proximity": 0.988,
     "traffic_signal_count": 0,
     "tags": [
-      "숲길",
       "바다뷰",
-      "차없는길"
+      "공원",
+      "숲길",
+      "다리",
+      "역사문화",
+      "전망",
+      "도심"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -3157,6 +3178,23 @@
       "cctv": 0.676,
       "nightlife": 0.913,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.99,
+      "beach": 0.0,
+      "river": 0.081,
+      "lake": 0.0,
+      "park": 0.192,
+      "forest": 0.222,
+      "footpath": 0.03,
+      "cycleway": 0.0,
+      "campus": 0.0,
+      "sports": 0.0,
+      "carfree": 0.03,
+      "bridge_run_m": 475,
+      "heritage_per_km": 3.65,
+      "viewpoints": 1,
+      "shops_per_km": 17.44
     }
   },
   {
@@ -4117,9 +4155,9 @@
     "coastline_proximity": 0.931,
     "traffic_signal_count": 0,
     "tags": [
-      "숲길",
-      "바다뷰",
-      "차없는길"
+      "강변",
+      "전망",
+      "도심"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -5248,6 +5286,23 @@
       "cctv": 1.0,
       "nightlife": 0.831,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.127,
+      "beach": 0.0,
+      "river": 0.408,
+      "lake": 0.0,
+      "park": 0.025,
+      "forest": 0.121,
+      "footpath": 0.032,
+      "cycleway": 0.0,
+      "campus": 0.0,
+      "sports": 0.032,
+      "carfree": 0.032,
+      "bridge_run_m": 25,
+      "heritage_per_km": 1.79,
+      "viewpoints": 1,
+      "shops_per_km": 30.17
     }
   },
   {
@@ -6596,8 +6651,8 @@
     "coastline_proximity": 0.938,
     "traffic_signal_count": 2,
     "tags": [
-      "숲길",
-      "바다뷰"
+      "공원",
+      "도심"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -8218,6 +8273,23 @@
       "cctv": 0.903,
       "nightlife": 1.0,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.117,
+      "beach": 0.019,
+      "river": 0.098,
+      "lake": 0.049,
+      "park": 0.184,
+      "forest": 0.03,
+      "footpath": 0.105,
+      "cycleway": 0.019,
+      "campus": 0.0,
+      "sports": 0.023,
+      "carfree": 0.124,
+      "bridge_run_m": 50,
+      "heritage_per_km": 0.0,
+      "viewpoints": 0,
+      "shops_per_km": 19.56
     }
   },
   {
@@ -9398,7 +9470,9 @@
     "coastline_proximity": 0.0,
     "traffic_signal_count": 30,
     "tags": [
-      "숲길"
+      "호수",
+      "숲길",
+      "도심"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -11017,6 +11091,23 @@
       "cctv": 0.102,
       "nightlife": 0.153,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.0,
+      "beach": 0.0,
+      "river": 0.0,
+      "lake": 0.115,
+      "park": 0.057,
+      "forest": 0.26,
+      "footpath": 0.05,
+      "cycleway": 0.0,
+      "campus": 0.0,
+      "sports": 0.0,
+      "carfree": 0.05,
+      "bridge_run_m": 0,
+      "heritage_per_km": 0.0,
+      "viewpoints": 0,
+      "shops_per_km": 0.77
     }
   },
   {
@@ -11517,7 +11608,10 @@
     "coastline_proximity": 0.0,
     "traffic_signal_count": 7,
     "tags": [
-      "숲길"
+      "강변",
+      "자전거길",
+      "차없는길",
+      "전망"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -12196,6 +12290,23 @@
       "cctv": 0.215,
       "nightlife": 0.0,
       "police": 0.728
+    },
+    "scenery": {
+      "coast": 0.0,
+      "beach": 0.0,
+      "river": 0.76,
+      "lake": 0.0,
+      "park": 0.056,
+      "forest": 0.0,
+      "footpath": 0.016,
+      "cycleway": 0.688,
+      "campus": 0.0,
+      "sports": 0.0,
+      "carfree": 0.696,
+      "bridge_run_m": 50,
+      "heritage_per_km": 0.0,
+      "viewpoints": 1,
+      "shops_per_km": 0.32
     }
   },
   {
@@ -13428,9 +13539,9 @@
     "coastline_proximity": 0.992,
     "traffic_signal_count": 0,
     "tags": [
-      "숲길",
       "바다뷰",
-      "차없는길"
+      "공원",
+      "도심"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -14955,6 +15066,23 @@
       "cctv": 1.0,
       "nightlife": 1.0,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.401,
+      "beach": 0.0,
+      "river": 0.047,
+      "lake": 0.0,
+      "park": 0.279,
+      "forest": 0.0,
+      "footpath": 0.07,
+      "cycleway": 0.0,
+      "campus": 0.0,
+      "sports": 0.017,
+      "carfree": 0.07,
+      "bridge_run_m": 25,
+      "heritage_per_km": 1.86,
+      "viewpoints": 0,
+      "shops_per_km": 35.42
     }
   },
   {
@@ -16619,8 +16747,8 @@
     "coastline_proximity": 0.938,
     "traffic_signal_count": 2,
     "tags": [
-      "숲길",
-      "바다뷰"
+      "전망",
+      "도심"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -18587,6 +18715,23 @@
       "cctv": 0.531,
       "nightlife": 0.896,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.166,
+      "beach": 0.017,
+      "river": 0.089,
+      "lake": 0.036,
+      "park": 0.096,
+      "forest": 0.0,
+      "footpath": 0.089,
+      "cycleway": 0.0,
+      "campus": 0.0,
+      "sports": 0.01,
+      "carfree": 0.089,
+      "bridge_run_m": 25,
+      "heritage_per_km": 0.8,
+      "viewpoints": 1,
+      "shops_per_km": 25.75
     }
   },
   {
@@ -18915,9 +19060,10 @@
     "coastline_proximity": 0.993,
     "traffic_signal_count": 0,
     "tags": [
-      "숲길",
       "바다뷰",
-      "차없는길"
+      "공원",
+      "역사문화",
+      "전망"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -19340,6 +19486,23 @@
       "cctv": 0.554,
       "nightlife": 0.623,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.804,
+      "beach": 0.0,
+      "river": 0.0,
+      "lake": 0.0,
+      "park": 0.175,
+      "forest": 0.144,
+      "footpath": 0.216,
+      "cycleway": 0.144,
+      "campus": 0.0,
+      "sports": 0.0,
+      "carfree": 0.33,
+      "bridge_run_m": 25,
+      "heritage_per_km": 3.32,
+      "viewpoints": 7,
+      "shops_per_km": 2.49
     }
   },
   {
@@ -20796,9 +20959,9 @@
     "coastline_proximity": 0.988,
     "traffic_signal_count": 0,
     "tags": [
-      "숲길",
-      "바다뷰",
-      "차없는길"
+      "강변",
+      "다리",
+      "도심"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -22563,6 +22726,23 @@
       "cctv": 0.934,
       "nightlife": 0.569,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.397,
+      "beach": 0.0,
+      "river": 0.314,
+      "lake": 0.0,
+      "park": 0.061,
+      "forest": 0.175,
+      "footpath": 0.009,
+      "cycleway": 0.0,
+      "campus": 0.0,
+      "sports": 0.022,
+      "carfree": 0.009,
+      "bridge_run_m": 475,
+      "heritage_per_km": 0.7,
+      "viewpoints": 0,
+      "shops_per_km": 22.24
     }
   },
   {
@@ -23079,9 +23259,10 @@
     "coastline_proximity": 0.993,
     "traffic_signal_count": 0,
     "tags": [
-      "숲길",
       "바다뷰",
-      "차없는길"
+      "공원",
+      "역사문화",
+      "전망"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -23702,6 +23883,23 @@
       "cctv": 0.488,
       "nightlife": 0.659,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 1.0,
+      "beach": 0.0,
+      "river": 0.0,
+      "lake": 0.0,
+      "park": 0.226,
+      "forest": 0.102,
+      "footpath": 0.248,
+      "cycleway": 0.007,
+      "campus": 0.0,
+      "sports": 0.0,
+      "carfree": 0.255,
+      "bridge_run_m": 25,
+      "heritage_per_km": 2.34,
+      "viewpoints": 7,
+      "shops_per_km": 5.27
     }
   },
   {
@@ -25186,6 +25384,8 @@
     "coastline_proximity": 0.0,
     "traffic_signal_count": 19,
     "tags": [
+      "강변",
+      "자전거길",
       "도심"
     ],
     "source": "manual_curation+osm",
@@ -27045,6 +27245,23 @@
       "cctv": 0.21,
       "nightlife": 0.118,
       "police": 0.591
+    },
+    "scenery": {
+      "coast": 0.0,
+      "beach": 0.0,
+      "river": 0.635,
+      "lake": 0.043,
+      "park": 0.078,
+      "forest": 0.137,
+      "footpath": 0.027,
+      "cycleway": 0.184,
+      "campus": 0.0,
+      "sports": 0.0,
+      "carfree": 0.212,
+      "bridge_run_m": 50,
+      "heritage_per_km": 0.16,
+      "viewpoints": 0,
+      "shops_per_km": 0.63
     }
   },
   {
@@ -28217,7 +28434,10 @@
     "coastline_proximity": 0.0,
     "traffic_signal_count": 4,
     "tags": [
-      "숲길"
+      "호수",
+      "공원",
+      "숲길",
+      "보행자길"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -29806,6 +30026,23 @@
       "cctv": 0.385,
       "nightlife": 0.082,
       "police": 0.988
+    },
+    "scenery": {
+      "coast": 0.0,
+      "beach": 0.0,
+      "river": 0.0,
+      "lake": 0.103,
+      "park": 0.193,
+      "forest": 0.214,
+      "footpath": 0.383,
+      "cycleway": 0.0,
+      "campus": 0.0,
+      "sports": 0.0,
+      "carfree": 0.383,
+      "bridge_run_m": 25,
+      "heritage_per_km": 0.99,
+      "viewpoints": 0,
+      "shops_per_km": 0.16
     }
   },
   {
@@ -30917,9 +31154,7 @@
     "green_ratio": 0.464,
     "coastline_proximity": 0.0,
     "traffic_signal_count": 13,
-    "tags": [
-      "숲길"
-    ],
+    "tags": [],
     "source": "manual_curation+osm",
     "steps": [
       {
@@ -32569,6 +32804,23 @@
       "cctv": 0.44,
       "nightlife": 0.189,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.0,
+      "beach": 0.0,
+      "river": 0.117,
+      "lake": 0.014,
+      "park": 0.052,
+      "forest": 0.094,
+      "footpath": 0.028,
+      "cycleway": 0.0,
+      "campus": 0.0,
+      "sports": 0.047,
+      "carfree": 0.028,
+      "bridge_run_m": 25,
+      "heritage_per_km": 1.32,
+      "viewpoints": 0,
+      "shops_per_km": 0.57
     }
   },
   {
@@ -33853,7 +34105,9 @@
     "coastline_proximity": 0.0,
     "traffic_signal_count": 20,
     "tags": [
-      "숲길"
+      "강변",
+      "공원",
+      "도심"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -35550,6 +35804,23 @@
       "cctv": 0.0,
       "nightlife": 0.041,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.0,
+      "beach": 0.0,
+      "river": 0.687,
+      "lake": 0.016,
+      "park": 0.199,
+      "forest": 0.126,
+      "footpath": 0.041,
+      "cycleway": 0.061,
+      "campus": 0.0,
+      "sports": 0.0,
+      "carfree": 0.098,
+      "bridge_run_m": 100,
+      "heritage_per_km": 0.16,
+      "viewpoints": 0,
+      "shops_per_km": 0.0
     }
   },
   {
@@ -37422,8 +37693,8 @@
     "coastline_proximity": 0.996,
     "traffic_signal_count": 2,
     "tags": [
-      "숲길",
-      "바다뷰"
+      "전망",
+      "도심"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -39562,6 +39833,23 @@
       "cctv": 0.284,
       "nightlife": 0.48,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.146,
+      "beach": 0.04,
+      "river": 0.269,
+      "lake": 0.0,
+      "park": 0.013,
+      "forest": 0.024,
+      "footpath": 0.029,
+      "cycleway": 0.016,
+      "campus": 0.0,
+      "sports": 0.005,
+      "carfree": 0.045,
+      "bridge_run_m": 50,
+      "heritage_per_km": 0.85,
+      "viewpoints": 1,
+      "shops_per_km": 19.52
     }
   },
   {
@@ -40645,10 +40933,7 @@
     "green_ratio": 0.558,
     "coastline_proximity": 0.926,
     "traffic_signal_count": 2,
-    "tags": [
-      "숲길",
-      "바다뷰"
-    ],
+    "tags": [],
     "source": "manual_curation+osm",
     "steps": [
       {
@@ -41864,6 +42149,23 @@
       "cctv": 0.57,
       "nightlife": 0.194,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.043,
+      "beach": 0.035,
+      "river": 0.112,
+      "lake": 0.0,
+      "park": 0.0,
+      "forest": 0.031,
+      "footpath": 0.027,
+      "cycleway": 0.023,
+      "campus": 0.0,
+      "sports": 0.012,
+      "carfree": 0.05,
+      "bridge_run_m": 25,
+      "heritage_per_km": 0.0,
+      "viewpoints": 0,
+      "shops_per_km": 9.8
     }
   },
   {
@@ -42884,8 +43186,7 @@
     "coastline_proximity": 0.834,
     "traffic_signal_count": 0,
     "tags": [
-      "바다뷰",
-      "차없는길"
+      "도심"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -44178,6 +44479,23 @@
       "cctv": 0.662,
       "nightlife": 0.683,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.062,
+      "beach": 0.0,
+      "river": 0.049,
+      "lake": 0.0,
+      "park": 0.049,
+      "forest": 0.0,
+      "footpath": 0.043,
+      "cycleway": 0.08,
+      "campus": 0.0,
+      "sports": 0.0,
+      "carfree": 0.105,
+      "bridge_run_m": 25,
+      "heritage_per_km": 1.74,
+      "viewpoints": 0,
+      "shops_per_km": 15.15
     }
   },
   {
@@ -45562,8 +45880,7 @@
     "coastline_proximity": 0.938,
     "traffic_signal_count": 2,
     "tags": [
-      "숲길",
-      "바다뷰"
+      "도심"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -47168,6 +47485,23 @@
       "cctv": 0.478,
       "nightlife": 0.677,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.124,
+      "beach": 0.02,
+      "river": 0.072,
+      "lake": 0.044,
+      "park": 0.1,
+      "forest": 0.0,
+      "footpath": 0.084,
+      "cycleway": 0.0,
+      "campus": 0.0,
+      "sports": 0.008,
+      "carfree": 0.084,
+      "bridge_run_m": 50,
+      "heritage_per_km": 0.0,
+      "viewpoints": 0,
+      "shops_per_km": 12.59
     }
   },
   {
@@ -47852,7 +48186,9 @@
     "coastline_proximity": 0.0,
     "traffic_signal_count": 12,
     "tags": [
-      "숲길"
+      "보행자길",
+      "역사문화",
+      "도심"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -48743,6 +49079,23 @@
       "cctv": 0.542,
       "nightlife": 0.487,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.0,
+      "beach": 0.0,
+      "river": 0.0,
+      "lake": 0.0,
+      "park": 0.065,
+      "forest": 0.0,
+      "footpath": 0.363,
+      "cycleway": 0.0,
+      "campus": 0.016,
+      "sports": 0.0,
+      "carfree": 0.363,
+      "bridge_run_m": 25,
+      "heritage_per_km": 3.9,
+      "viewpoints": 0,
+      "shops_per_km": 7.8
     }
   },
   {
@@ -49959,7 +50312,7 @@
     "coastline_proximity": 0.0,
     "traffic_signal_count": 9,
     "tags": [
-      "숲길"
+      "강변"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -51760,6 +52113,23 @@
       "cctv": 0.712,
       "nightlife": 0.097,
       "police": 0.935
+    },
+    "scenery": {
+      "coast": 0.0,
+      "beach": 0.0,
+      "river": 0.469,
+      "lake": 0.039,
+      "park": 0.13,
+      "forest": 0.053,
+      "footpath": 0.072,
+      "cycleway": 0.005,
+      "campus": 0.0,
+      "sports": 0.0,
+      "carfree": 0.077,
+      "bridge_run_m": 0,
+      "heritage_per_km": 1.55,
+      "viewpoints": 0,
+      "shops_per_km": 1.16
     }
   },
   {
@@ -53124,7 +53494,7 @@
     "coastline_proximity": 0.0,
     "traffic_signal_count": 13,
     "tags": [
-      "숲길"
+      "역사문화"
     ],
     "source": "manual_curation+osm",
     "steps": [
@@ -55135,6 +55505,23 @@
       "cctv": 0.64,
       "nightlife": 0.218,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.0,
+      "beach": 0.0,
+      "river": 0.074,
+      "lake": 0.0,
+      "park": 0.065,
+      "forest": 0.0,
+      "footpath": 0.083,
+      "cycleway": 0.0,
+      "campus": 0.0,
+      "sports": 0.0,
+      "carfree": 0.083,
+      "bridge_run_m": 0,
+      "heritage_per_km": 2.09,
+      "viewpoints": 0,
+      "shops_per_km": 2.09
     }
   },
   {
@@ -61390,6 +61777,23 @@
       "cctv": 0.074,
       "nightlife": 0.13,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.0,
+      "beach": 0.0,
+      "river": 0.054,
+      "lake": 0.026,
+      "park": 0.085,
+      "forest": 0.011,
+      "footpath": 0.089,
+      "cycleway": 0.03,
+      "campus": 0.046,
+      "sports": 0.002,
+      "carfree": 0.117,
+      "bridge_run_m": 50,
+      "heritage_per_km": 0.67,
+      "viewpoints": 0,
+      "shops_per_km": 0.74
     }
   },
   {
@@ -63639,7 +64043,8 @@
     "coastline_proximity": 0.0,
     "traffic_signal_count": 27,
     "tags": [
-      "숲길"
+      "전망",
+      "도심"
     ],
     "source": "manual_curation+osm",
     "return_path": [
@@ -65867,6 +66272,23 @@
       "cctv": 0.528,
       "nightlife": 0.339,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.0,
+      "beach": 0.0,
+      "river": 0.161,
+      "lake": 0.0,
+      "park": 0.11,
+      "forest": 0.003,
+      "footpath": 0.144,
+      "cycleway": 0.04,
+      "campus": 0.079,
+      "sports": 0.0,
+      "carfree": 0.178,
+      "bridge_run_m": 25,
+      "heritage_per_km": 1.02,
+      "viewpoints": 1,
+      "shops_per_km": 2.6
     }
   },
   {
@@ -68340,8 +68762,8 @@
     "coastline_proximity": 0.988,
     "traffic_signal_count": 2,
     "tags": [
-      "숲길",
-      "바다뷰"
+      "다리",
+      "도심"
     ],
     "source": "manual_curation+osm",
     "return_path": [
@@ -70855,6 +71277,23 @@
       "cctv": 0.315,
       "nightlife": 0.402,
       "police": 1.0
+    },
+    "scenery": {
+      "coast": 0.241,
+      "beach": 0.021,
+      "river": 0.241,
+      "lake": 0.0,
+      "park": 0.033,
+      "forest": 0.071,
+      "footpath": 0.021,
+      "cycleway": 0.014,
+      "campus": 0.0,
+      "sports": 0.005,
+      "carfree": 0.035,
+      "bridge_run_m": 475,
+      "heritage_per_km": 0.38,
+      "viewpoints": 0,
+      "shops_per_km": 17.67
     }
   },
   {
@@ -72254,7 +72693,8 @@
     "coastline_proximity": 0.0,
     "traffic_signal_count": 14,
     "tags": [
-      "도심"
+      "강변",
+      "다리"
     ],
     "source": "manual_curation+osm",
     "return_path": [
@@ -73650,6 +74090,23 @@
       "cctv": 0.0,
       "nightlife": 0.065,
       "police": 0.998
+    },
+    "scenery": {
+      "coast": 0.0,
+      "beach": 0.0,
+      "river": 0.371,
+      "lake": 0.0,
+      "park": 0.0,
+      "forest": 0.016,
+      "footpath": 0.078,
+      "cycleway": 0.02,
+      "campus": 0.0,
+      "sports": 0.0,
+      "carfree": 0.094,
+      "bridge_run_m": 375,
+      "heritage_per_km": 0.13,
+      "viewpoints": 0,
+      "shops_per_km": 0.39
     }
   }
 ]

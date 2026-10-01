@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 from ..data_collection.add_course import add_course as register_course_full
 from ..data_collection.refresh_route import refresh_course_in_db
+from ..data_collection.scenery import tag_descriptions
 from ..recommend.companion import COMPANIONS, companion_options
 from ..recommend.destination import course_to_destination
 from ..recommend.environment import environment_context_map
@@ -48,6 +49,8 @@ API_KEYS = {
     "TMAP_APP_KEY": "코스 생성, 턴바이턴 안내",
     "KMA_API_KEY": "실시간 날씨 반영",
 }
+
+SCENERY_TAGS = tag_descriptions()  # {태그: 붙는 기준}
 
 
 def missing_keys() -> list:
@@ -152,6 +155,15 @@ class RecommendRequest(BaseModel):
     companion: Optional[str] = None  # 값 목록: GET /onboarding/companions
     time_of_day: Optional[Literal["morning", "afternoon", "evening", "night"]] = None  # 생략하면 서버 시각 기준
 
+    @field_validator("environment_tags")
+    @classmethod
+    def _known_scenery(cls, v):
+        # 없는 태그(예: "벚꽃길")를 조용히 받으면 결과가 0개로 나가고 앱은 이유를 모른다
+        unknown = [tag for tag in (v or []) if tag not in SCENERY_TAGS]
+        if unknown:
+            raise ValueError(f"알 수 없는 풍경 태그 {unknown}. 사용할 수 있는 값은 GET /onboarding/scenery 참고")
+        return v
+
     @field_validator("companion")
     @classmethod
     def _known_companion(cls, v):
@@ -185,6 +197,24 @@ def onboarding_purposes(experience_level: str = "beginner"):
     입문자에게 "인터벌 훈련"을, 상급자에게 "5km 완주"를 물어보면 온보딩이 어색해진다.
     """
     return {"experience_level": experience_level, "purposes": purposes_for(experience_level)}
+
+
+@app.get("/onboarding/scenery")
+def onboarding_scenery():
+    """고를 수 있는 풍경 목록. 실제로 그 풍경을 가진 코스가 있는 것만, 붙는 기준과 함께 내려준다.
+
+    코스가 하나도 없는 풍경은 뺀다 — 골라도 결과가 0개인 선택지를 보여주지 않기 위해서다.
+    """
+    counts = {}
+    for course in load_courses():
+        for tag in course.get("tags", []):
+            counts[tag] = counts.get(tag, 0) + 1
+    options = [
+        {"value": tag, "description": description, "course_count": counts[tag]}
+        for tag, description in SCENERY_TAGS.items() if counts.get(tag)
+    ]
+    options.sort(key=lambda o: -o["course_count"])
+    return {"scenery": options}
 
 
 @app.get("/onboarding/companions")

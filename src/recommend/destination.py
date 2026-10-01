@@ -7,6 +7,7 @@
 (일방통행·횡단보도 때문에 갈 때와 올 때 안내가 다르다).
 """
 from ..api_clients.tmap_pedestrian import extract_path, extract_steps, get_route
+from ..data_collection import scenery
 from ..data_collection.build_courses_from_landmarks import geocode, sample_elevation_gain
 from .route_type import attach_actual_return_path, make_roundtrip
 from .step_position import assign_positions
@@ -41,6 +42,12 @@ def course_to_destination(lat: float, lng: float, place: str = None,
         "tags": [],
         "source": "live_generated",
     }
+
+    measured = scenery.tags_for_path(path, course)  # 지형 데이터가 있는 지역이면 실제 풍경을 잰다
+    if measured is None:
+        course["scenery_pending"] = True
+    else:
+        course["scenery"], course["tags"] = measured
 
     if route_type == "roundtrip":
         course = make_roundtrip(attach_actual_return_path(course))

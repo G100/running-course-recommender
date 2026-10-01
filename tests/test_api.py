@@ -82,3 +82,25 @@ def test_recommend_with_nearby_location_uses_db():
     body = resp.json()
     assert body["source"] == "db"
     assert len(body["results"]) == 1
+
+
+def test_scenery_options_list_only_tags_that_have_courses():
+    """골라도 결과가 0개인 선택지는 보여주지 않는다."""
+    options = client.get("/onboarding/scenery").json()["scenery"]
+    assert options, "풍경 선택지가 비어 있다"
+    assert all(o["course_count"] >= 1 for o in options)
+    assert all(o["description"] for o in options)
+    values = [o["value"] for o in options]
+    assert "바다뷰" in values and "강변" in values
+
+
+def test_every_offered_scenery_tag_returns_courses():
+    for option in client.get("/onboarding/scenery").json()["scenery"]:
+        resp = client.post("/recommend", json={"environment_tags": [option["value"]], "route_type": "oneway",
+                                                "use_live_environment": False})
+        assert resp.json()["results"], f"{option['value']}을 골랐는데 결과가 없다"
+
+
+def test_unknown_scenery_tag_is_rejected():
+    resp = client.post("/recommend", json={"environment_tags": ["벚꽃길"], "use_live_environment": False})
+    assert resp.status_code == 422

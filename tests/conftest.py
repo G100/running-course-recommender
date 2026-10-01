@@ -25,6 +25,11 @@ def isolated_course_db(tmp_path, monkeypatch):
     # 사용자 프로필도 테스트마다 빈 파일에서 시작한다
     from src.recommend import personalize
     monkeypatch.setattr(personalize, "PROFILES_PATH", str(tmp_path / "user_profiles.json"))
+    # 지형 캐시(data/osm_cache)는 저장소에 없다. 내 PC에 있다고 테스트 결과가 달라지면 안 되므로
+    # 테스트에서는 항상 캐시가 없는 상태로 둔다 (필요한 테스트는 tags_for_path를 monkeypatch 한다)
+    from src.data_collection import scenery, scenery_osm
+    monkeypatch.setattr(scenery_osm, "CACHE_DIR", str(tmp_path / "osm_cache"))
+    monkeypatch.setattr(scenery, "_index_cache", {})
     yield copy
 
 

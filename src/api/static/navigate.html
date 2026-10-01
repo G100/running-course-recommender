@@ -201,11 +201,8 @@
 
       <div class="field">
         <label>원하는 풍경</label>
-        <div class="chips" id="tagChips">
-          <button class="chip" data-tag="바다뷰">바다뷰</button>
-          <button class="chip" data-tag="숲길">숲길</button>
-          <button class="chip" data-tag="차없는길">차없는길</button>
-        </div>
+        <div class="chips" id="tagChips" aria-live="polite"></div>
+        <p class="hint" id="tagHint">풍경을 고르면 그 풍경을 실제로 지나는 코스만 추천합니다.</p>
       </div>
 
       <div class="field">
@@ -688,7 +685,25 @@ document.querySelectorAll('#elevSeg button').forEach(b => b.addEventListener('cl
   document.querySelectorAll('#elevSeg button').forEach(x => x.classList.remove('on'));
   b.classList.add('on');
 }));
-document.querySelectorAll('#tagChips .chip').forEach(b => b.addEventListener('click', () => b.classList.toggle('on')));
+// 풍경 선택지는 서버가 내려준다 — 실제로 그 풍경을 지나는 코스가 있는 것만, 붙는 기준과 함께.
+// 화면에 고정해 두면 코스가 없는 풍경도 고를 수 있게 되어 결과 0개가 나온다.
+const DEFAULT_TAG_HINT = document.getElementById('tagHint').textContent;
+fetch('/onboarding/scenery').then(r => r.json()).then(({ scenery }) => {
+  const box = document.getElementById('tagChips');
+  scenery.forEach(option => {
+    const chip = document.createElement('button');
+    chip.className = 'chip';
+    chip.dataset.tag = option.value;
+    chip.textContent = `${option.value} ${option.course_count}`;
+    chip.title = option.description;
+    chip.addEventListener('click', () => {
+      chip.classList.toggle('on');
+      document.getElementById('tagHint').textContent =
+        chip.classList.contains('on') ? `${option.value}: ${option.description}` : DEFAULT_TAG_HINT;
+    });
+    box.appendChild(chip);
+  });
+}).catch(() => { document.getElementById('tagHint').textContent = '풍경 목록을 불러오지 못했습니다.'; });
 document.querySelectorAll('#routeSeg button').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('#routeSeg button').forEach(x => x.classList.remove('on'));
   b.classList.add('on');
