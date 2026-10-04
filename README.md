@@ -2,6 +2,8 @@
 
 사용자 조건(거리·시간·페이스·목적·동반자)과 현위치로 러닝 코스를 추천하고, 실제 보행 경로와 턴바이턴 안내를 내려주는 FastAPI 서버.
 
+> 발표 자료(진도 점검·중간 점검 대비): [docs/발표자료.md](docs/발표자료.md)
+
 ## 빠른 시작
 
 **Python 3.10 이상 필요** (3.10 ~ 3.14, 아나콘다 3.11에서 확인). `python --version`으로 먼저 확인하세요.
@@ -11,16 +13,29 @@ git clone https://github.com/G100/running-course-recommender.git
 cd running-course-recommender
 python -m venv .venv
 .venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-copy .env.example .env             # macOS/Linux, Git Bash: cp .env.example .env
+python -m src.setup_local          # 기준 환경과 똑같이 맞춘다 (처음 한 번, 약 10~15분)
 python -m uvicorn src.api.main:app --reload
 ```
+
+`python -m src.setup_local`이 하는 일 (이미 된 단계는 건너뜀):
+
+1. 파이썬 3.10 이상인지 확인
+2. 패키지 설치 (`requirements.txt` + 지도 변환용 `requirements-map.txt`)
+3. `.env`가 없으면 만들고, 비어 있는 API 키를 알려줌 → **키 값은 팀 채널에서 받아 넣는다** (시스템 환경변수에 넣어도 된다)
+4. 팀 기준 날짜로 고정한 한국 OSM 파일(약 290MB)을 받고 MD5로 같은 파일인지 확인
+5. 로컬 지형 DB를 만듦 (약 8분, 880MB). 기준과 다른 DB가 있으면 다시 만듦
+6. 인도 확인 기록을 저장소의 씨앗 파일(`data/sidewalk_facts.seed.json`)로 시작
+7. 테스트를 돌리고 기준과 비교한 결과를 보여줌
+
+끝에 `✔ 기준 환경과 같습니다`가 나오면 된다. 서버를 띄운 뒤 http://localhost:8000/health 에서 `local_map.matches_team: true`, `local_map.elements: 2052310`이면 기준 PC와 같은 지도다. 같은 지도·같은 코드·같은 인도 확인 기록이므로 같은 요청에 같은 코스가 나온다.
+
+**맞추지 않는 것**: API 키(각자 `.env`), 각자 쌓인 사용자 데이터(`data/app.sqlite` — 취향·평가·로그인), 쓰면서 늘어나는 인도 확인 기록. 기록을 팀과 다시 맞추려면 한 사람이 `python -c "from src.recommend.sidewalk import export_seed; print(export_seed())"`로 씨앗 파일을 갱신해 커밋한다.
 
 - 데모 화면: http://localhost:8000
 - API 문서(직접 호출 가능): http://localhost:8000/docs
 - 테스트: `python -m pytest`
 
-> `git pull` 후에는 항상 `pip install -r requirements.txt`를 다시 실행하세요. 의존성 버전이 고정돼 있습니다.
+> `git pull` 후에는 `python -m src.setup_local`을 다시 실행하세요. 바뀐 것만 반영하고(패키지, 지도 DB 버전), 이미 같은 것은 건너뜁니다.
 
 ## API 키
 
@@ -323,9 +338,11 @@ python -m src.data_collection.backfill_scenery   # 풍경 태그 (지형 데이�
 실시간 생성은 출발점 주변의 길과 지형이 필요하다. 기본은 Overpass API인데 건당 5~20초에 실패(504·429)가 잦다. 같은 데이터를 파일로 한 번 받아 두면 **실행 중 Overpass 호출이 0건**이 된다.
 
 ```bash
-pip install osmium==4.3.1
-python -m src.data_collection.local_osm     # 한국 전체 약 290MB 내려받기 + 변환 8분 → data/osm_local/korea.sqlite (약 870MB)
+python -m src.setup_local                   # 위 "빠른 시작"의 설치 스크립트가 이것까지 해 준다
+python -m src.data_collection.local_osm     # 지도 DB만 따로 만들 때 (팀 기준 날짜 파일, 결과 약 880MB)
 ```
+
+받는 지도 파일은 날짜를 고정했다(`south-korea-260929.osm.pbf`, MD5 확인). "latest"를 받으면 받은 날마다 데이터가 달라서 같은 요청에도 사람마다 다른 경로가 나온다. 지도를 새 날짜로 바꿀 때는 `local_osm.py`의 `PBF_URL`·`PBF_MD5`·`BUILD_VERSION`을 같이 바꾸고 팀 전원이 설치 스크립트를 다시 돌린다.
 
 | | Overpass (기본) | 로컬 지형 데이터 |
 |---|---|---|
@@ -337,6 +354,7 @@ python -m src.data_collection.local_osm     # 한국 전체 약 290MB 내려받�
 | 설치 | 없음 | 위 명령 1회 |
 
 - 안 만들어도 서버는 그대로 동작한다(자동으로 Overpass 사용). 파일은 저장소에 올리지 않는다
+- 지도 DB가 어떤 파일·어떤 버전으로 만들어졌는지 DB 안에 기록되고, `/health`의 `local_map`에서 확인할 수 있다
 - 길이 막다른 길인지는 변환할 때 전국 도로망으로 판정해 둔다. 경유지는 막다른 길에 잡지 않는다
 - 길 점수 모델(`data/road_model.json`)은 저장소에 들어 있어 다시 학습할 필요 없다. 다시 하려면 `python -m src.recommend.learn_roads --cells 2496`
 - 내려받기가 안 되면 https://download.geofabrik.de/asia/south-korea.html 에서 `.osm.pbf`를 직접 받아 `--pbf 경로`로 준다
@@ -375,6 +393,7 @@ python -m pytest               # 올리기 전 통과 확인
 - **목적지 경로에도 같은 규칙을 적용했습니다.** 8km 이내 목적지는 도로망에서 직접 짜서 인도 없는 차도를 피하고 밤에는 사람 있는 길로 갑니다. 그렇게 갈 길이 없으면 Tmap 경로를 주되 `no_car_lanes: null`(확인 못 함)로 표시합니다
 - 데모 화면에 즐겨찾기(코스 카드의 ☆, 목록에서 다시 불러오기)를 넣었습니다
 - 실측(낮 → 밤, 인적 드문 길 비율): 광주 상무 순환 37% → 0%, 해운대 28% → 2%, 망원동 31% → 7%, 여의도 31% → 22%. 밤에는 인적 드문 구간이 가장 적은 후보만 남기므로 거리가 덜 맞을 수 있습니다(여의도 6km 요청에 4.09km)
+- **팀원 환경을 기준 PC와 똑같이 맞추는 설치 스크립트를 넣었습니다** (`python -m src.setup_local`). 지도 파일 날짜를 고정하고, 인도 확인 기록을 씨앗 파일로 공유합니다. `/health`에 `local_map`(지도 DB 출처·일치 여부)과 `sidewalk_facts`(아는 길 수)가 추가됐습니다
 - **안전성을 경로에 반영했습니다.** 밤에는 상가·큰길 쪽으로 경로를 짜고, 실시간 생성 코스의 안전 점수(고정 0.7이었음)와 신호등 수를 실제 시설로 계산합니다. 로컬 지형 DB에 CCTV·경찰서·신호등이 추가돼 **DB를 다시 만들어야 합니다** (`python -m src.data_collection.local_osm`)
 - **로그인을 추가했습니다.** `/auth/signup`·`/auth/login`으로 받은 토큰을 `Authorization: Bearer`로 보내면, 그 계정의 취향·이력·즐겨찾기는 본인만 볼 수 있습니다. 로그인 없이 쓰던 방식(`demo-…` id)도 그대로 동작합니다. 후기 응답의 `user_id`는 `author`로 바뀌었습니다
 - **사용자 DB를 만들었습니다.** 취향·평가 이력이 `data/app.sqlite`에 사용자별로 쌓이고, `GET /users/{user_id}/taste`로 본인 것을 볼 수 있습니다(요약·중요도·한 답·이력·변화 과정). `DELETE /users/{user_id}`로 전부 지울 수 있습니다
@@ -396,6 +415,8 @@ python -m pytest               # 올리기 전 통과 확인
 | 증상 | 해결 |
 |---|---|
 | `pip install`에서 `No matching distribution` / `requires Python>=3.10` | 파이썬 3.10 이상 설치 후 가상환경을 다시 만들기 |
+| 같은 요청인데 팀원과 다른 코스가 나옴 | `python -m src.setup_local` 다시 실행 → `/health`의 `local_map.matches_team`이 `true`인지 확인 |
+| 설치 스크립트가 "받은 파일이 팀 기준 파일과 다릅니다" | 내려받다 끊긴 것. 다시 실행. 계속되면 팀원에게 `data/osm_extract/south-korea.osm.pbf`를 직접 받아 같은 자리에 둔다 |
 | `uvicorn`을 찾을 수 없음 | `python -m uvicorn ...`으로 실행 |
 | `ModuleNotFoundError` 또는 테스트 수집 오류 | `pip install -r requirements.txt` 다시 실행 |
 | 실시간 코스 생성이 `503` | `.env`에 `TMAP_APP_KEY` 입력 후 서버 재시작 |

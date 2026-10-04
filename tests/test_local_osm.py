@@ -99,3 +99,31 @@ def test_safety_facilities_are_read_separately_from_roads(tmp_path):
     box = (LAT - 0.01, LNG - 0.01, LAT + 0.01, LNG + 0.01)
     assert len(local_osm.load_bbox(box, path, kinds="f")) == 3
     assert [e["type"] for e in local_osm.load_bbox(box, path, kinds="r")] == ["way"]
+
+
+class TestSameAsTheTeam:
+    def test_build_records_where_the_db_came_from(self, db):
+        info = local_osm.info()
+        assert info["elements"] == 8 and info["build_version"] == local_osm.BUILD_VERSION
+
+    def test_db_from_a_different_map_file_does_not_match(self, db):
+        """다른 날짜의 지도로 만든 DB는 같은 요청에도 다른 코스를 낸다. 기준과 다르다고 알려준다."""
+        assert local_osm.info()["matches_team"] is False   # 테스트 DB는 기준 파일로 만들지 않았다
+
+    def test_no_db_means_no_info(self, tmp_path):
+        assert local_osm.info(str(tmp_path / "none.sqlite")) is None
+
+
+def test_sidewalk_knowledge_starts_from_the_shared_seed(tmp_path, monkeypatch):
+    """팀원 모두 같은 인도 확인 기록에서 시작한다."""
+    import json
+
+    from src.recommend import sidewalk
+
+    seed = tmp_path / "seed.json"
+    seed.write_text(json.dumps({"35.0,127.0,35.0,127.001": True, "35.1,127.0,35.1,127.001": False}), encoding="utf-8")
+    monkeypatch.setattr(sidewalk, "SEED_PATH", str(seed))
+    monkeypatch.setattr(sidewalk, "FACTS_PATH", str(tmp_path / "facts.sqlite"))
+    assert sidewalk.load_facts() == {"35.0,127.0,35.0,127.001": True, "35.1,127.0,35.1,127.001": False}
+    sidewalk.save_facts({"35.2,127.0,35.2,127.001": True})
+    assert sidewalk.export_seed() == 3

@@ -40,6 +40,7 @@ from ..recommend.personalize import (answer_labels, answers_view, explain, feedb
                                      taste_summary, weights_for)
 from ..recommend.score import component_scores, filter_by_required_tags, recommend
 from ..recommend.trim import truncate_course
+from ..data_collection import local_osm
 from ..recommend import auth, nearby_scenery, scenery_choices, user_store
 from ..recommend.timeofday import current_period
 
@@ -507,9 +508,15 @@ def delete_my_data(user_id: str, authorization: Optional[str] = Header(default=N
 @app.get("/health")
 def health():
     """키 '값'은 절대 내보내지 않고, 설정 여부만 알려준다 (팀원 환경 자가진단용)."""
+    from ..recommend import sidewalk
+
     return {
         "status": "ok",
         "keys": {name: bool(os.environ.get(name)) for name in API_KEYS},
+        # 로컬 지형 DB: 없으면 직접 경로 탐색 대신 Tmap 최단 경로로 동작한다.
+        # matches_team이 true면 팀 기준 파일·코드로 만든 것 (python -m src.setup_local 로 맞춘다)
+        "local_map": local_osm.info(),
+        "sidewalk_facts": len(sidewalk.load_facts()),
     }
 
 

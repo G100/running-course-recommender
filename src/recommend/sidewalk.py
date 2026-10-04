@@ -14,6 +14,7 @@
 큰길은 도로망에서 빼고 다시 짠다. 한 번 확인한 길은 다음 요청부터 묻지 않고 안다.
 """
 import contextlib
+import json
 import os
 import sqlite3
 from collections import defaultdict
@@ -24,6 +25,9 @@ from ..api_clients.tmap_pedestrian import extract_path, extract_steps, get_route
 from ..data_collection.enrich import haversine_m
 
 FACTS_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "sidewalk_facts.sqlite")
+# 저장소에 들어 있는 확인 기록. 처음 실행할 때 이걸로 시작해서, 팀원 모두 같은 길을 이미 아는 상태가 된다
+# (안 그러면 사람마다 처음 몇 번은 Tmap에 다시 묻고, 그동안 경로가 서로 다르게 나온다).
+SEED_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "sidewalk_facts.seed.json")
 
 SEPARATED, CAR_FREE, MIXED, UNPLEASANT = 21, 23, 22, 24
 CROSSINGS = ("12", "14", "15")
@@ -111,8 +115,14 @@ def _open():
 
 def _connect() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(FACTS_PATH) or ".", exist_ok=True)
+    fresh = not os.path.exists(FACTS_PATH)
     db = sqlite3.connect(FACTS_PATH)
     db.execute("CREATE TABLE IF NOT EXISTS facts (way TEXT PRIMARY KEY, sidewalk INTEGER NOT NULL)")
+    if fresh and os.path.exists(SEED_PATH):
+        with open(SEED_PATH, encoding="utf-8") as f:
+            seed = json.load(f)
+        db.executemany("INSERT OR IGNORE INTO facts VALUES (?, ?)", [(k, int(v)) for k, v in seed.items()])
+        db.commit()
     return db
 
 
@@ -122,9 +132,17 @@ def way_key(points: list) -> str:
     return f"{a[0]:.6f},{a[1]:.6f},{b[0]:.6f},{b[1]:.6f}"
 
 
+def export_seed() -> int:
+    """지금까지 쌓인 확인 기록을 씨앗 파일로 내보낸다 (저장소에 올려 팀과 맞출 때)."""
+    facts = load_facts()
+    with open(SEED_PATH, "w", encoding="utf-8") as f:
+        json.dump(dict(sorted(facts.items())), f, ensure_ascii=False, indent=0)
+    return len(facts)
+
+
 def load_facts() -> dict:
     """{길 키: True(인도 있음) / False(없음)}."""
-    if not os.path.exists(FACTS_PATH):
+    if not os.path.exists(FACTS_PATH) and not os.path.exists(SEED_PATH):
         return {}
     with _open() as db:
         return {key: bool(value) for key, value in db.execute("SELECT way, sidewalk FROM facts")}

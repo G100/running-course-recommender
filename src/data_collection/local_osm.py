@@ -12,6 +12,7 @@ Overpass는 건당 5~20초가 걸리고 504·429로 자주 실패한다. 같은 
 DB가 없으면 area_cache가 예전처럼 Overpass로 받는다.
 """
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -21,7 +22,12 @@ import time
 
 DB_PATH = os.path.join("data", "osm_local", "korea.sqlite")
 PBF_PATH = os.path.join("data", "osm_extract", "south-korea.osm.pbf")
-PBF_URL = "https://download.geofabrik.de/asia/south-korea-latest.osm.pbf"
+# 팀 전원이 같은 지도를 쓰도록 날짜를 고정한 파일을 받는다. "latest"를 받으면 받은 날마다 데이터가
+# 달라서, 같은 요청에도 사람마다 다른 경로가 나온다. 바꿀 때는 URL·MD5·BUILD_VERSION을 같이 바꾼다.
+PBF_URL = "https://download.geofabrik.de/asia/south-korea-260929.osm.pbf"
+PBF_MD5 = "7775afecd9ccbf3285ace3f1fa2ec7f4"
+# DB를 만드는 코드가 바뀌면 올린다. 설치 스크립트가 이 값이 다른 DB를 다시 만든다.
+BUILD_VERSION = "2026-10-01-safety"
 CELL_DEG = 0.02
 
 # 저장할 길: 사람이 지나갈 수 있는 길 전부. 경로를 직접 짜려면(road_graph) 큰길·통로까지 이어져 있어야 한다.
@@ -102,6 +108,7 @@ class Writer:
         """)
         self.count = 0
         self.endpoints = set()   # 저장한 길의 양 끝 노드 — 막다른 길 판정에 쓴다
+        self.source_md5 = None   # 만든 OSM 파일의 MD5 — 팀원과 같은 데이터인지 확인용
         self._elements, self._cells = [], []
 
     def _add(self, body: dict, points: list, first=None, last=None):
@@ -152,6 +159,10 @@ class Writer:
                 if first != last and (degree.get(first, 0) < 2 or degree.get(last, 0) < 2)]
         self.db.executemany("UPDATE elements SET dead_end = 1 WHERE id = ?", dead)
         self.db.execute("CREATE INDEX cells_rc ON cells (r, c)")
+        self.db.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+        self.db.executemany("INSERT INTO meta VALUES (?,?)", [
+            ("elements", str(self.count)), ("dead_ends", str(len(dead))), ("build_version", BUILD_VERSION),
+            ("source_md5", self.source_md5 or ""), ("built_at", time.strftime("%Y-%m-%d %H:%M:%S"))])
         self.db.commit()
         self.db.close()
         return len(dead)
@@ -179,6 +190,46 @@ def available(db_path: str = None) -> bool:
     return os.path.exists(db_path or DB_PATH)
 
 
+def info(db_path: str = None):
+    """DB가 어떤 데이터·어떤 코드로 만들어졌는지. 없으면 None. 팀원끼리 같은 환경인지 비교할 때 쓴다."""
+    path = db_path or DB_PATH
+    if not os.path.exists(path):
+        return None
+    db = sqlite3.connect(path)
+    try:
+        has_meta = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone()
+        meta = dict(db.execute("SELECT key, value FROM meta")) if has_meta else {}
+    finally:
+        db.close()
+    return {"elements": int(meta["elements"]) if meta.get("elements") else None,
+            "build_version": meta.get("build_version"), "source_md5": meta.get("source_md5"),
+            "built_at": meta.get("built_at"),
+            "matches_team": meta.get("build_version") == BUILD_VERSION and meta.get("source_md5") == PBF_MD5}
+
+
+def file_md5(path: str) -> str:
+    digest = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def stamp(db_path: str, pbf_path: str) -> None:
+    """메타 정보가 없는 예전 DB에 출처를 적는다 (다시 만들지 않고)."""
+    db = sqlite3.connect(db_path)
+    try:
+        count = db.execute("SELECT COUNT(*) FROM elements").fetchone()[0]
+        dead = db.execute("SELECT COUNT(*) FROM elements WHERE dead_end = 1").fetchone()[0]
+        db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+        db.executemany("INSERT OR REPLACE INTO meta VALUES (?,?)", [
+            ("elements", str(count)), ("dead_ends", str(dead)), ("build_version", BUILD_VERSION),
+            ("source_md5", file_md5(pbf_path)), ("built_at", time.strftime("%Y-%m-%d %H:%M:%S"))])
+        db.commit()
+    finally:
+        db.close()
+
+
 def load_bbox(bbox: tuple, db_path: str = None, kinds: str = None) -> list:
     """(south, west, north, east) 안에 걸친 요소들. kinds="s"처럼 주면 그 종류만 읽는다."""
     south, west, north, east = bbox
@@ -202,7 +253,7 @@ def download(pbf_path: str):
     import requests
     os.makedirs(os.path.dirname(pbf_path), exist_ok=True)
     print(f"내려받는 중: {PBF_URL}")
-    with requests.get(PBF_URL, stream=True, timeout=60) as response:
+    with requests.get(PBF_URL, stream=True, timeout=60, allow_redirects=True) as response:
         response.raise_for_status()
         total = int(response.headers.get("content-length", 0))
         done = 0
@@ -212,6 +263,10 @@ def download(pbf_path: str):
                 done += len(chunk)
                 if total and done % (20 << 20) < (1 << 20):
                     print(f"  {done >> 20}/{total >> 20} MB", flush=True)
+    got = file_md5(pbf_path + ".part")
+    if got != PBF_MD5:
+        os.remove(pbf_path + ".part")
+        raise SystemExit(f"받은 파일이 팀 기준 파일과 다릅니다 (MD5 {got}). 다시 시도하거나 팀원에게 파일을 받으세요.")
     os.replace(pbf_path + ".part", pbf_path)
 
 
@@ -232,6 +287,7 @@ def build(pbf_path: str, db_path: str):
                     on_route.setdefault(member.ref, kind)
     print(f"  공개 코스에 속한 길 {len(on_route):,}개", flush=True)
     writer = Writer(db_path)
+    writer.source_md5 = file_md5(pbf_path)
     reader = osmium.FileProcessor(pbf_path).with_locations().with_areas().with_filter(osmium.filter.KeyFilter(*KEYS))
     for obj in reader:
         if obj.is_node():
