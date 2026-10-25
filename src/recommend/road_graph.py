@@ -47,6 +47,9 @@ MAIN_ROADS = {"tertiary", "secondary", "primary"}
 SHOP_NEAR_M = 60
 DETOUR_FOR_BAD_ROAD = 2.0    # 점수 0인 길은 길이를 (1 + 이 값)배로 친다
 REUSE_PENALTY = 4.0          # 이미 지나간 길을 다시 지나면 이만큼 더 길게 친다 (같은 길 되짚기 방지)
+# Tmap이 피한 길(대개 Tmap 지도에 없는 공원·단지 안 보행로). 그 길로 짜면 Tmap이 다른 길로 돌아가서
+# 거리가 늘어난다. 막지는 않는다 — 다른 길이 아예 없으면 그 길이라도 써야 한다
+TMAP_AVOIDED_PENALTY = 4.0
 SNAP_M = 150
 TURN_DEG = 35                # 이보다 크게 꺾이면 좌·우회전으로 안내한다
 
@@ -148,9 +151,12 @@ def _walkable(tags: dict) -> bool:
 class RoadGraph:
     """한 동네의 도로망. 꼭짓점이 곧 노드다(OSM에서 이어진 길은 좌표를 공유한다)."""
 
-    def __init__(self, elements: list, indexes: dict, model: dict = None, facts: dict = None):
+    def __init__(self, elements: list, indexes: dict, model: dict = None, facts: dict = None, avoided: set = None):
         from . import sidewalk
+        from .tmap_follow import tmap_avoided, way_id
         facts = sidewalk.load_facts() if facts is None else facts
+        avoided_keys = tmap_avoided() if avoided is None else avoided
+        self.avoided = set()                 # Tmap이 피한 길 번호
         self.indexes = indexes
         self.model = model or load_model()
         self.ways = []                       # (tags, points)
@@ -172,6 +178,8 @@ class RoadGraph:
             if known is not None and kind not in ("walkway", "steps"):
                 kind = "sidewalk" if known else ("alley" if is_alley(tags) else BLOCKED)
             self.surfaces.append(kind)
+            if avoided_keys and way_id(points) in avoided_keys:
+                self.avoided.add(way)
             for a, b in zip(points, points[1:]):
                 if a == b:
                     continue
@@ -243,6 +251,22 @@ class RoadGraph:
                         best, best_d = node, d
         return best
 
+    def distances_from(self, start: tuple, max_m: float) -> dict:
+        """{노드: 걸어서 가는 최단 거리 m} — max_m까지. 막힌 길(인도 없는 차도)은 지나지 않는다."""
+        dist, heap = {start: 0.0}, [(0.0, start)]
+        while heap:
+            d, node = heapq.heappop(heap)
+            if d > dist.get(node, float("inf")):
+                continue
+            for neighbour, edge_m, way in self.adjacent[node]:
+                if self.surfaces[way] == BLOCKED:
+                    continue
+                nd = d + edge_m
+                if nd <= max_m and nd < dist.get(neighbour, float("inf")):
+                    dist[neighbour] = nd
+                    heapq.heappush(heap, (nd, neighbour))
+        return dist
+
     def shortest(self, start: tuple, goal: tuple, used: set = None, max_m: float = 30000, night: bool = False):
         """점수를 반영한 비용으로 가장 좋은 길. [(노드, 길 번호), ...] 또는 None.
 
@@ -267,6 +291,8 @@ class RoadGraph:
                     factor *= NIGHT_PENALTY[self.night_kind(way)]
                 if (node, neighbour) in used or (neighbour, node) in used:
                     factor *= REUSE_PENALTY
+                if way in self.avoided:
+                    factor *= TMAP_AVOIDED_PENALTY
                 new_cost = cost + edge_m * factor
                 if new_cost < best.get(neighbour, float("inf")):
                     best[neighbour] = new_cost

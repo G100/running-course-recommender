@@ -29,6 +29,9 @@ def isolated_course_db(tmp_path, monkeypatch):
     monkeypatch.setattr(sidewalk, "FACTS_PATH", str(tmp_path / "sidewalk_facts.sqlite"))
     monkeypatch.setattr(sidewalk, "SEED_PATH", str(tmp_path / "no_seed.json"))
     monkeypatch.setattr(user_store, "DB_PATH", str(tmp_path / "app.sqlite"))
+    from src.api_clients import elevation
+    monkeypatch.setattr(elevation, "CACHE_PATH", str(tmp_path / "elevation_cache.sqlite"))
+    monkeypatch.setattr(elevation, "_memory", {})
     # 지형 캐시(data/osm_cache)는 저장소에 없다. 내 PC에 있다고 테스트 결과가 달라지면 안 되므로
     # 테스트에서는 항상 캐시가 없는 상태로 둔다 (필요한 테스트는 tags_for_path를 monkeypatch 한다)
     from src.data_collection import scenery, scenery_osm

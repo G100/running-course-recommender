@@ -186,6 +186,45 @@ class TestOwnRouteToDestination:
         assert [34.001, 127.004] in [[round(p[0], 6), round(p[1], 6)] for p in course["path"]]
         assert course["steps"][-1]["description"] == "도착"
 
+    def _seaside(self, monkeypatch):
+        """곧장 가는 산책로(약 550m)와, 남쪽 해안을 따라 돌아가는 산책로(약 1.7km)."""
+        a, b = (34.0, 127.0), (34.0, 127.006)
+        shore = [(33.995, 127.0 + 0.001 * i) for i in range(7)]
+        self._area(monkeypatch, [
+            self._way(1, [a, (34.0, 127.003), b], highway="footway"),
+            self._way(2, [a, (33.9975, 127.0), shore[0]], highway="footway"),
+            self._way(3, shore, highway="footway"),
+            self._way(4, [shore[-1], (33.9975, 127.006), b], highway="footway"),
+            self._way(9, [(33.994, 126.99), (33.994, 127.02)], natural="coastline"),
+        ])
+        monkeypatch.setattr(destination, "get_route", lambda *args, **k: pytest.fail("직접 갈 수 있는데 Tmap을 불렀다"))
+        return a, b
+
+    def test_without_scenery_the_direct_way_is_taken(self, monkeypatch):
+        a, b = self._seaside(monkeypatch)
+        course = destination.course_to_destination(*a, None, *b)
+        assert course["distance_km"] < 0.7
+
+    def test_chosen_sea_is_passed_on_the_way(self, monkeypatch):
+        """바다를 골랐으면 목적지까지 곧장 가지 않고 해안을 따라 돌아간다 (여수에서 1.3km 직행이 나왔다)."""
+        a, b = self._seaside(monkeypatch)
+        course = destination.course_to_destination(*a, None, *b, tags={"바다뷰", "해변"}, want_km=2.0)
+        assert any(p[0] <= 33.9955 for p in course["path"]), "해안 길로 가지 않았다"
+        assert 1.4 <= course["distance_km"] <= 2.4
+
+    def test_sea_points_that_cannot_be_reached_are_not_used(self, monkeypatch):
+        """해안 길이 섬에만 있으면(이어진 길이 없다) 그쪽을 경유지로 잡지 않는다 (여수에서 경로가 끊겨 직행으로 돌아갔다)."""
+        from src.data_collection import area_cache
+
+        a, b = (34.0, 127.0), (34.0, 127.006)
+        self._area(monkeypatch, [
+            self._way(1, [a, (34.0, 127.003), b], highway="footway"),
+            self._way(3, [(33.995, 127.0 + 0.001 * i) for i in range(7)], highway="footway"),   # 섬
+            self._way(9, [(33.994, 126.99), (33.994, 127.02)], natural="coastline"),
+        ])
+        area = area_cache.load_area(34.0, 127.0)
+        assert destination.scenic_waypoints(area, {"바다뷰"}, a, b, 2.0) == []
+
     def test_falls_back_to_tmap_and_says_so_when_no_safe_way_exists(self, monkeypatch, stub):
         a, b = (34.0, 127.0), (34.02, 127.02)
         self._area(monkeypatch, [self._way(1, [a, b], highway="secondary", sidewalk="no")])

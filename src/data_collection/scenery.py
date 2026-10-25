@@ -336,7 +336,8 @@ def scenery_tags(measures: dict, course: dict) -> list:
     if (measures.get("shops_per_km", 0) >= DOWNTOWN_SHOPS_PER_KM
             or course.get("traffic_signal_count", 0) / km >= DOWNTOWN_SIGNALS_PER_KM):
         tags.append("도심")
-    if "숲길" in tags and course.get("elevation_gain_m", 0) / km >= MOUNTAIN_CLIMB_M_PER_KM:
+    # 고도를 아직 안 쟀으면(후보를 다 만든 뒤 한 번에 잰다) 산길은 그때 다시 붙인다
+    if "숲길" in tags and (course.get("elevation_gain_m") or 0) / km >= MOUNTAIN_CLIMB_M_PER_KM:
         tags.append("산길")
     return tags
 

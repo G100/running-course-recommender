@@ -3,7 +3,6 @@ import os
 
 import pytest
 
-from src.recommend.nl_keywords import extract_tags
 from src.recommend.score import distance_match, recommend, score_course, signal_free_match
 
 SAMPLE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "courses.sample.json")
@@ -17,8 +16,6 @@ def courses():
 
 def test_coastal_lover_prefers_coastal_course(courses):
     user = {
-        "fitness_level": 3,
-        "purpose": "힐링",
         "preferred_distance_km": 4,
         "elevation_preference": "low",
         "environment_tags": {"바다뷰"},
@@ -61,16 +58,6 @@ def test_signal_free_course_scores_full_marks():
     assert signal_free_match({"distance_km": 5, "traffic_signal_count": 0}, user) == 1.0
 
 
-def test_extract_tags_from_natural_language_sentence():
-    text = "멈추지 않고 달릴 수 있고 나무가 많거나 바다가 보이는 코스"
-    tags = extract_tags(text)
-    assert tags == {"차없는길", "숲길", "바다뷰"}
-
-
-def test_extract_tags_empty_for_no_match():
-    assert extract_tags("아무거나 상관없어요") == set()
-
-
 def test_distance_match_is_perfect_for_longer_courses():
     """중간에 끊고 돌아오면 되니까, 선호 거리보다 길기만 하면(6km든 20km든) 만점이어야 한다."""
     user = {"preferred_distance_km": 5}
@@ -96,7 +83,27 @@ def test_loop_distance_score_prefers_target_length():
     assert distance_match(exact, user) > distance_match(over, user)
 
 
-def test_generated_loop_ranking_changes_with_elevation_preference():
+def test_elevation_does_not_change_the_ranking_while_it_is_off():
+    """고도 데이터가 부정확해 꺼 둔 동안에는(평지도 25~40m로 잰다) 고도 선호가 순위를 바꾸지 않는다."""
+    from src.recommend import score
+
+    assert score.ELEVATION_ENABLED is False
+    flat = {
+        "id": "flat-loop", "source": "live_generated", "route_type": "loop",
+        "distance_km": 5.0, "elevation_gain_m": 20, "safety_score": 0.7,
+        "traffic_signal_count": 0, "tags": [],
+    }
+    hilly = {**flat, "id": "hilly-loop", "elevation_gain_m": 150}
+    low = {"preferred_distance_km": 5.0, "elevation_preference": "low", "environment_tags": set()}
+    high = dict(low, elevation_preference="high")
+    assert score_course(flat, low) == score_course(flat, high) == score_course(hilly, low)
+    assert "elevation" not in score.component_scores(flat, low)
+
+
+def test_generated_loop_ranking_changes_with_elevation_preference_when_turned_on(monkeypatch):
+    from src.recommend import score
+
+    monkeypatch.setattr(score, "ELEVATION_ENABLED", True)
     flat = {
         "id": "flat-loop", "source": "live_generated", "route_type": "loop",
         "distance_km": 5.0, "elevation_gain_m": 20, "safety_score": 0.7,

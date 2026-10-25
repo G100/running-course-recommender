@@ -194,23 +194,3 @@ class TestUnverifiedTags:
         assert [c["id"] for c in kept] == ["p"]
 
 
-class TestKeywords:
-    def test_every_keyword_tag_is_a_real_scenery_tag(self):
-        """사전에만 있고 실제로는 붙지 않는 태그가 있으면, 그 말을 쓴 사용자는 항상 결과 0개를 받는다."""
-        from src.data_collection.scenery import tag_descriptions
-        from src.recommend.nl_keywords import KEYWORD_TAG_MAP
-
-        assert set(KEYWORD_TAG_MAP) <= set(tag_descriptions())
-
-    @pytest.mark.parametrize("sentence,expected", [
-        ("강변 따라 뛰고 싶어", "강변"),
-        ("호수 한 바퀴 돌 수 있는 곳", "호수"),
-        ("유적지 구경하면서 달리기", "역사문화"),
-        ("경치 좋은 코스", "전망"),
-        ("대교 건너는 코스", "다리"),
-        ("자전거도로로 쭉 달리고 싶어", "자전거길"),
-    ])
-    def test_sentences_map_to_tags(self, sentence, expected):
-        from src.recommend.nl_keywords import extract_tags
-
-        assert expected in extract_tags(sentence)

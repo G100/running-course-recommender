@@ -1,8 +1,7 @@
-"""같은 자리에서 같은 거리를 다시 요청하면 루프를 새로 만들지 않는다.
+"""현위치가 있으면 저장된 코스보다 그 자리에서 새로 만든 경로가 먼저다.
 
-실시간 루프 생성은 요청 1건에 Tmap 3건 + 13초가 든다. Tmap 무료 한도가 하루 1,000건이라
-매번 새로 만들면 하루 333회로 팀 전체가 막힌다. 한 번 만든 루프는 DB에 쌓이므로,
-그 자리에 맞는 게 이미 있으면 그걸 쓰고 없을 때만 만든다.
+저장된 코스는 예전 규칙으로 만든 것일 수 있다(인도 확인·거리 맞추기·풍경 기준이 계속 바뀌었다).
+지금 규칙으로 바로 만든 경로를 먼저 주고, 만들 수 없을 때(장애·키 없음)만 저장된 코스로 답한다.
 """
 from fastapi import BackgroundTasks
 
@@ -35,10 +34,23 @@ def _run(monkeypatch, stored):
     return response, calls
 
 
-def test_existing_loop_at_the_same_spot_is_reused(monkeypatch):
+def test_live_route_comes_first_even_when_a_saved_loop_fits(monkeypatch):
     response, calls = _run(monkeypatch, [_loop("cached", 34.0, 127.0, 5.1)])
-    assert not calls, "맞는 루프가 이미 있는데 Tmap을 다시 불렀다"
+    assert calls, "저장된 루프를 주고 새로 만들지 않았다"
+    assert response["results"][0]["course"]["id"] == "fresh"
+    assert response["source"] == "generated"
+
+
+def test_saved_loop_is_the_fallback_when_making_one_fails(monkeypatch):
+    def fail(*a, **k):
+        raise ValueError("Tmap 보행자 순환 경로를 찾지 못했습니다.")
+
+    monkeypatch.setattr(main, "load_courses", lambda: [_loop("cached", 34.0, 127.0, 5.1)])
+    monkeypatch.setattr(main, "filter_nearby", lambda courses, lat, lng, radius: courses)
+    monkeypatch.setattr(main, "generate_loop_candidates", fail)
+    response = main.post_recommend(_request(), BackgroundTasks())
     assert response["results"][0]["course"]["id"] == "cached"
+    assert response["source"] == "db"
 
 
 def test_loop_of_a_different_length_is_not_reused(monkeypatch):
@@ -78,17 +90,52 @@ def test_cached_loop_without_the_requested_scenery_is_not_reused(monkeypatch):
     assert [r["course"]["id"] for r in response["results"]] == ["fresh-river"]
 
 
-def test_no_loop_with_the_requested_scenery_is_reported_not_returned_empty(monkeypatch):
-    """요청한 풍경의 순환을 못 만들었으면 빈 목록(200)이 아니라 이유를 알려준다."""
-    import pytest
-    from fastapi import HTTPException
-
-    park_loop = dict(_loop("fresh-park", 34.0, 127.0, 5.0), tags=["공원"])
+def _generated(monkeypatch, generate):
     monkeypatch.setattr(main, "load_courses", lambda: [])
     monkeypatch.setattr(main, "filter_nearby", lambda courses, lat, lng, radius: courses)
-    monkeypatch.setattr(main, "generate_loop_candidates", lambda *a, **k: [park_loop])
+    monkeypatch.setattr(main, "generate_loop_candidates", generate)
 
-    with pytest.raises(HTTPException) as error:
-        main.post_recommend(_request(environment_tags=["강변"]), BackgroundTasks())
-    assert error.value.status_code == 404
-    assert "강변" in error.value.detail
+
+def test_at_night_the_runner_is_asked_before_a_secluded_scenic_path(monkeypatch):
+    """밤에 강변을 골랐는데 강변이 인적 드문 길이면, 정하지 않고 사용자에게 묻는다 (위험할 수 있으니)."""
+    safe = dict(_loop("safe", 34.0, 127.0, 5.0), tags=["공원"], scenery={"river": 0.1})
+    scenic = dict(_loop("riverside", 34.0, 127.0, 5.0), tags=["강변"], scenery={"river": 0.5})
+    nights = []
+
+    def generate(lat, lng, km, tags, route_type=None, night=False):
+        nights.append(night)
+        return [safe] if night else [scenic]
+
+    _generated(monkeypatch, generate)
+    first = main.post_recommend(_request(environment_tags=["강변"], time_of_day="night"), BackgroundTasks())
+    assert first["results"][0]["course"]["id"] == "safe"
+    assert "위험" in first["choice"]["question"]
+    go = next(o for o in first["choice"]["options"] if o["set"])
+
+    second = main.post_recommend(_request(environment_tags=["강변"], time_of_day="night", **go["set"]), BackgroundTasks())
+    assert second["results"][0]["course"]["id"] == "riverside" and nights[-1] is False
+    assert second.get("choice") is None
+
+
+def test_when_the_scenery_is_out_of_reach_the_runner_chooses_a_longer_run(monkeypatch):
+    """요청 거리로는 호수까지 인도로 갈 수 없으면(수원 광교 3km) 풍경 없는 코스를 주고, 늘릴지 묻는다."""
+    plain = dict(_loop("plain", 34.0, 127.0, 5.0), tags=["공원"])
+
+    def generate(lat, lng, km, tags, route_type=None, night=False):
+        if tags and km < 8:
+            raise ValueError("차도를 피해 가는 코스를 만들지 못했습니다.")
+        if tags:
+            return [dict(_loop("lake", 34.0, 127.0, km), tags=["호수"], scenery={"lake": 0.5})]
+        return [plain]
+
+    _generated(monkeypatch, generate)
+    first = main.post_recommend(_request(environment_tags=["호수"], time_of_day="morning"), BackgroundTasks())
+    assert first["results"][0]["course"]["id"] == "plain"
+    assert "호수" in first["notice"]
+    longer = next(o for o in first["choice"]["options"] if o["set"])
+
+    second = main.post_recommend(_request(environment_tags=["호수"], time_of_day="morning", **longer["set"]),
+                                 BackgroundTasks())
+    course = second["results"][0]["course"]
+    assert course["id"] == "lake" and course["distance_km"] >= 8
+    assert "길" in second["notice"] and second.get("choice") is None

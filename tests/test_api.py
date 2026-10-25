@@ -9,11 +9,10 @@ def test_health():
     assert client.get("/health").json()["status"] == "ok"
 
 
-def test_recommend_with_free_text():
+def test_recommend_with_chosen_scenery():
     payload = {
         "preferred_distance_km": 4,
-        "elevation_preference": "low",
-        "text": "바다가 보이는 코스 추천해줘",
+        "environment_tags": ["바다"],
         "top_n": 1,
         "use_live_environment": False,
     }
@@ -27,32 +26,14 @@ def test_recommend_with_free_text():
     assert "바다뷰" in results[0]["course"]["tags"]
 
 
-def test_companion_sent_through_the_api_actually_filters():
-    """점수 함수만 테스트하면 API가 필드를 버려도 모른다 — 요청 경로 끝까지 확인한다."""
-    resp = client.post("/recommend", json={
-        "preferred_distance_km": 3, "companion": "유아차", "top_n": 10, "use_live_environment": False,
-    })
-    assert resp.status_code == 200
-    results = resp.json()["results"]
-    assert results, "결과가 비면 필터가 동작하는지 알 수 없다"
-    for r in results:
-        assert r["course"]["elevation_gain_m"] <= 40
-
-
-def test_companion_caps_apply_to_the_distance_actually_run():
-    """코스는 목표 거리로 잘려서 나가므로, 상한은 잘린 뒤 실제로 뛰는 거리에 적용해야 한다.
-    왕복(거리·고도 2배) 전체 길이로 거르면 입문자 30분 + 유아차 요청이 결과 0개가 된다."""
-    resp = client.post("/recommend", json={
-        "preferred_time_min": 30, "experience_level": "beginner", "companion": "유아차",
-        "top_n": 3, "use_live_environment": False,
-    })
-    assert resp.status_code == 200
-    assert resp.json()["results"]
-
-
-def test_unknown_companion_is_rejected_instead_of_silently_ignored():
-    resp = client.post("/recommend", json={"companion": "유모차", "use_live_environment": False})
-    assert resp.status_code == 422
+def test_removed_fields_from_older_apps_are_ignored_not_rejected():
+    """동반자·목적·숙련도·문장 입력·날씨를 뺐다. 예전 앱이 그 값을 보내도 오류 없이 추천은 나간다."""
+    resp = client.post("/recommend", json={"preferred_distance_km": 3, "top_n": 1, "companion": "유아차",
+                                           "purpose": "기록 단축", "experience_level": "beginner",
+                                           "text": "바다", "use_live_environment": True})
+    assert resp.status_code == 200 and resp.json()["results"]
+    assert client.get("/onboarding/companions").status_code == 404
+    assert client.get("/onboarding/purposes").status_code == 404
 
 
 def test_time_of_day_is_part_of_the_request_contract():
@@ -62,26 +43,26 @@ def test_time_of_day_is_part_of_the_request_contract():
     assert bad.status_code == 422  # 모델에 없는 필드면 조용히 무시돼 422가 나지 않는다
 
 
-def test_onboarding_lists_companion_options():
-    options = client.get("/onboarding/companions").json()["companions"]
-    assert {"value": "유아차", "label": "유아차를 밀면서"} in options
+def test_with_a_location_a_live_route_comes_before_saved_courses(monkeypatch):
+    """근처에 저장된 코스가 있어도, 현위치가 있으면 그 자리에서 새로 만든 경로를 먼저 준다."""
+    from src.api import main
+
+    made = {"id": "generated-live", "name": "지금 만든 코스", "region": "실시간 생성", "distance_km": 4.0,
+            "elevation_gain_m": None, "surface": "paved", "safety_score": 0.7, "route_type": "oneway",
+            "path": [[34.7393, 127.7359], [34.75, 127.74]], "steps": [], "tags": ["바다뷰"], "source": "live_generated"}
+    monkeypatch.setattr(main, "generate_loop_candidates", lambda *a, **k: [dict(made)])
+    monkeypatch.setattr(main, "register_in_background", lambda course: None)
+    body = client.post("/recommend", json={
+        "preferred_distance_km": 4, "environment_tags": ["바다"], "route_type": "oneway", "top_n": 1,
+        "current_lat": 34.7393, "current_lng": 127.7359, "max_distance_km": 5,
+    }).json()
+    assert body["source"] == "generated"
+    assert body["results"][0]["course"]["id"] == "generated-live"
 
 
-def test_recommend_with_nearby_location_uses_db():
-    payload = {
-        "preferred_distance_km": 4,
-        "text": "바다가 보이는 코스",
-        "top_n": 1,
-        "use_live_environment": False,
-        "current_lat": 34.7393,
-        "current_lng": 127.7359,
-        "max_distance_km": 5,
-    }
-    resp = client.post("/recommend", json=payload)
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["source"] == "db"
-    assert len(body["results"]) == 1
+def test_without_a_location_saved_courses_are_recommended():
+    body = client.post("/recommend", json={"preferred_distance_km": 4, "environment_tags": ["바다"], "top_n": 1}).json()
+    assert body["source"] == "db" and body["results"]
 
 
 def test_scenery_options_list_only_tags_that_have_courses():
@@ -123,3 +104,19 @@ def test_nearby_courses_without_the_requested_scenery_fall_through_to_generation
     body = resp.json()
     assert body["source"] == "generated"
     assert body["results"][0]["course"]["id"] == "generated-test"
+
+
+def test_results_carry_the_map_data_attribution():
+    """OSM 데이터(ODbL)로 만든 결과는 출처를 표시해야 한다. 앱이 그대로 띄울 수 있게 응답에 넣는다."""
+    body = client.post("/recommend", json={"preferred_distance_km": 4, "top_n": 1, "use_live_environment": False}).json()
+    assert "OpenStreetMap contributors" in body["attribution"]
+
+
+def test_demo_page_loads_the_tmap_map_only_when_a_key_is_set(monkeypatch):
+    """키는 파일에 넣지 않고 페이지를 줄 때 끼운다. 키가 없으면 MapLibre 지도로 그린다."""
+    monkeypatch.setenv("TMAP_APP_KEY", "test-key-123")
+    page = client.get("/").text
+    assert "apis.openapi.sk.com/tmap/vectorjs?version=1&appKey=test-key-123" in page
+    monkeypatch.delenv("TMAP_APP_KEY")
+    page = client.get("/").text
+    assert "vectorjs" not in page and "{{TMAP_MAP_SCRIPT}}" not in page

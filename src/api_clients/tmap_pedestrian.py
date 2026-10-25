@@ -7,6 +7,7 @@
 발급 후 환경변수 TMAP_APP_KEY 설정.
 """
 import os
+import re
 
 import requests
 
@@ -74,5 +75,37 @@ def extract_steps(route_json: dict) -> list:
             "lat": lat, "lng": lng,
             "description": description,
             "turn_type": props.get("turnType"),
+            "instruction": runner_instruction(description, props.get("turnType"), props.get("nearPoiName")),
         })
     return steps
+
+
+# Tmap turnType → 달리는 사람에게 할 말. 무엇을 하면 되는지만, 짧게.
+TURN_ACTIONS = {
+    11: "쭉 가세요", 12: "왼쪽으로 도세요", 13: "오른쪽으로 도세요", 14: "뒤로 돌아가세요",
+    16: "왼쪽 뒤로 크게 꺾으세요", 17: "왼쪽으로 살짝 꺾으세요", 18: "오른쪽으로 살짝 꺾으세요", 19: "오른쪽 뒤로 크게 꺾으세요",
+    125: "육교로 건너세요", 126: "지하보도로 건너세요", 127: "계단이 있어요", 128: "경사로를 지나요", 129: "계단과 경사로를 지나요",
+    211: "횡단보도를 건너세요", 212: "왼쪽 횡단보도를 건너세요", 213: "오른쪽 횡단보도를 건너세요",
+    214: "왼쪽 뒤 횡단보도를 건너세요", 215: "왼쪽 앞 횡단보도를 건너세요", 216: "오른쪽 앞 횡단보도를 건너세요",
+    217: "오른쪽 뒤 횡단보도를 건너세요", 218: "엘리베이터를 타세요",
+    200: "출발하세요", 201: "도착했어요",
+}
+# "○○을/를 따라"에서 이름으로 부를 만하지 않은 길
+GENERIC_ROADS = {"보행자도로", "도보", "길", "보도", "인도", "산책로"}
+_FOLLOW = re.compile(r"(\S+?)(?:을|를) 따라")
+
+
+def runner_instruction(description: str, turn_type, near_poi: str = None) -> str:
+    """Tmap 안내("우회전 후 보행자도로를 따라 125m 이동")를 러너가 듣기 쉬운 말로 바꾼다.
+    무엇을 할지 먼저, 근처 가게·건물이 있으면 그 앞에서, 이름 있는 길이면 그 길을 따라.
+    거리는 화면·음성이 따로 말하므로 넣지 않는다. 모르는 안내는 Tmap 문구 그대로."""
+    action = TURN_ACTIONS.get(turn_type)
+    if action is None:
+        return description
+    if turn_type in (200, 201, 11):
+        where = ""
+    else:
+        where = f"{near_poi.strip()} 앞에서 " if near_poi and near_poi.strip() else ""
+    road = _FOLLOW.search(description or "")
+    road = road.group(1) if road and road.group(1) not in GENERIC_ROADS else None
+    return f"{where}{action}" + (f" · {road} 따라" if road and turn_type not in (201, 11) else "")

@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 
+from . import course_file
 from .enrich import enrich_course
 from .osm_overpass import fetch_osm_features
 
@@ -34,10 +35,7 @@ def bbox_from_path(path: list) -> str:
 
 
 def load_db(db_path: str) -> list:
-    if os.path.exists(db_path):
-        with open(db_path, encoding="utf-8") as f:
-            return json.load(f)
-    return []
+    return course_file.read(db_path)
 
 
 def add_course(raw_course: dict, db_path: str) -> dict:
@@ -50,12 +48,7 @@ def add_course(raw_course: dict, db_path: str) -> dict:
     enriched = enrich_course(raw_course, osm_features)
     enriched.setdefault("source", "manual_curation+osm")
 
-    db = load_db(db_path)
-    db = [c for c in db if c["id"] != enriched["id"]]  # 동일 id 있으면 갱신
-    db.append(enriched)
-
-    with open(db_path, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
+    course_file.upsert(db_path, enriched)   # 동일 id 있으면 갱신 (동시에 저장해도 서로 지우지 않는다)
 
     return enriched
 

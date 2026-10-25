@@ -7,25 +7,24 @@
 import pytest
 
 from src.recommend import personalize as p
-from src.recommend.score import DEFAULT_WEIGHTS_WITH_ENV
+from src.recommend.score import DEFAULT_WEIGHTS
 
 # 신호등 적음에서만 점수를 크게 받고 나머지는 평범한 코스
-SIGNAL_FREE_COURSE = {"distance": 0.5, "elevation": 0.5, "safety": 0.5, "signal_free": 1.0,
-                      "tag_match": 0.5, "time_fit": 0.5, "environment": 0.5}
+SIGNAL_FREE_COURSE = {"distance": 0.5, "safety": 0.5, "signal_free": 1.0, "tag_match": 0.5, "time_fit": 0.5}
 
 
 def _profile():
-    return p.new_profile("u1", survey={"experience_level": "beginner"})
+    return p.new_profile("u1", survey={"preferred_distance_km": 5})
 
 
 class TestColdStart:
     def test_new_profile_starts_from_default_weights(self):
         prof = _profile()
-        assert prof["weights"] == pytest.approx(DEFAULT_WEIGHTS_WITH_ENV)
+        assert prof["weights"] == pytest.approx(DEFAULT_WEIGHTS)
         assert prof["n_feedback"] == 0
 
     def test_survey_is_kept(self):
-        assert _profile()["survey"]["experience_level"] == "beginner"
+        assert _profile()["survey"]["preferred_distance_km"] == 5
 
 
 class TestLearning:
@@ -81,20 +80,26 @@ class TestLearningFromAlternatives:
         alternatives_mean = {**SIGNAL_FREE_COURSE, "distance": 1.0, "signal_free": 0.3}
         p.learn(prof, liked, rating=5, baseline=alternatives_mean)
         after = prof["weights"]
-        assert after["signal_free"] > DEFAULT_WEIGHTS_WITH_ENV["signal_free"]
+        assert after["signal_free"] > DEFAULT_WEIGHTS["signal_free"]
         # 정규화로 약간 줄 수는 있어도, 신호등만큼 올라가서는 안 된다
         assert after["distance"] <= before + 1e-9
 
     def test_single_recommendation_falls_back_to_within_course_comparison(self):
         prof = _profile()
         p.learn(prof, SIGNAL_FREE_COURSE, rating=5, baseline=None)
-        assert prof["weights"]["signal_free"] > DEFAULT_WEIGHTS_WITH_ENV["signal_free"]
+        assert prof["weights"]["signal_free"] > DEFAULT_WEIGHTS["signal_free"]
 
 
 class TestWeightsForScoring:
-    def test_environment_weight_is_dropped_when_live_environment_is_off(self):
-        weights = p.weights_for(_profile(), with_environment=False)
-        assert "environment" not in weights
+    def test_old_profiles_lose_the_weather_and_elevation_weights(self, monkeypatch):
+        """날씨는 뺐고 고도는 꺼 뒀다. 예전에 저장된 프로필에 그 가중치가 있어도 지금 항목만 남겨 합을 1로 맞춘다."""
+        from src.recommend import user_store
+
+        old = _profile()
+        old["weights"] = dict(old["weights"], environment=0.18, elevation=0.09)
+        user_store.put_profile(old)
+        weights = p.weights_for(p.load_profile("u1"))
+        assert set(weights) == set(DEFAULT_WEIGHTS)
         assert sum(weights.values()) == pytest.approx(1.0)
 
 
@@ -114,16 +119,16 @@ class TestExplanationIgnoresNormalizationDrift:
         """다른 항목이 줄면 합을 1로 맞추느라 나머지가 같이 오른다. 그걸 '중시한다'고 말하면 안 된다."""
         prof = _profile()
         liked = {k: 0.5 for k in SIGNAL_FREE_COURSE}
-        liked.update({"signal_free": 1.0, "safety": 0.1, "elevation": 0.1})
+        liked.update({"signal_free": 1.0, "safety": 0.1, "time_fit": 0.1})
         baseline = {k: 0.5 for k in SIGNAL_FREE_COURSE}
         p.learn(prof, liked, rating=5, baseline=baseline)
 
         rows = {r["factor"]: r for r in p.explain(prof)}
         assert p.explain(prof)[0]["factor"] == "signal_free"
-        for untouched in ("distance", "tag_match", "time_fit", "environment"):
+        for untouched in ("distance", "tag_match"):
             assert abs(rows[untouched]["preference"]) < 0.02, untouched
         assert rows["safety"]["preference"] < 0
-        assert rows["elevation"]["preference"] < 0
+        assert rows["time_fit"]["preference"] < 0
 
 
 class TestPersistence:

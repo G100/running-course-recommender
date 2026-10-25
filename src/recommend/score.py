@@ -1,32 +1,34 @@
 """규칙 기반 가중치 스코어링으로 사용자 조건에 맞는 코스를 추천한다.
 
 지도학습이 아니므로 라벨링된 학습 데이터셋 없이, 온보딩 입력 자체를 매칭 조건으로 사용한다.
+러닝 코스 추천에 직접 필요한 것만 본다: 거리, 고른 풍경, 신호등(멈춤), 안전, 시간대.
 """
 import math
 
 from ..data_collection.scenery import THRESHOLDS as SCENERY_THRESHOLDS
-from .companion import fits_companion, tune_for_companion
-from .profile import elevation_target_m, resolve_target_distance_km, tune_weights
+from .profile import elevation_target_m, resolve_target_distance_km
 from .timeofday import time_fit_match
 
-DEFAULT_WEIGHTS = {
-    "distance": 0.22,
-    "elevation": 0.13,
-    "safety": 0.13,
-    "signal_free": 0.18,
-    "tag_match": 0.22,
-    "time_fit": 0.12,
-}
+# 고도는 잠시 끈다. 지금 표고 데이터(SRTM 30m, 건물·나무 높이가 섞인 겉면 높이)로는 평지도
+# 25~40m 오르막으로 잰다(여의도 한강공원 1.8km 27m, 상무지구 큰길 1.2km 40m). 맨땅 높이 데이터
+# (국토지리정보원 DEM 등)를 쓰게 되면 True로 바꾼다 — 점수·평가 질문·코스의 고도 측정이 같이 켜진다.
+ELEVATION_ENABLED = False
 
-DEFAULT_WEIGHTS_WITH_ENV = {
-    "distance": 0.18,
-    "elevation": 0.09,
-    "safety": 0.13,
-    "signal_free": 0.14,
-    "tag_match": 0.18,
-    "environment": 0.18,
-    "time_fit": 0.10,
+DEFAULT_WEIGHTS = {
+    "distance": 0.25,
+    "tag_match": 0.25,
+    "signal_free": 0.2,
+    "safety": 0.15,
+    "time_fit": 0.15,
 }
+ELEVATION_WEIGHT = 0.13   # 고도를 켜면 이만큼 주고 나머지를 비율대로 줄인다
+
+
+def default_weights() -> dict:
+    if not ELEVATION_ENABLED:
+        return dict(DEFAULT_WEIGHTS)
+    rest = 1 - ELEVATION_WEIGHT
+    return dict({k: v * rest for k, v in DEFAULT_WEIGHTS.items()}, elevation=ELEVATION_WEIGHT)
 
 
 def _decay(diff: float, tolerance: float) -> float:
@@ -53,7 +55,7 @@ def distance_match(course: dict, user: dict) -> float:
 
 def elevation_match(course: dict, user: dict) -> float:
     target = elevation_target_m(user)
-    diff = abs(course.get("elevation_gain_m", 0) - target)
+    diff = abs((course.get("elevation_gain_m") or 0) - target)
     return _decay(diff, tolerance=target * 0.6 + 10)
 
 
@@ -101,38 +103,34 @@ def tag_match(course: dict, user: dict) -> float:
     return sum(max(_tag_strength(tag, course) for tag in group) for group in groups) / len(groups)
 
 
-def component_scores(course: dict, user: dict, env_context: dict = None) -> dict:
+def component_scores(course: dict, user: dict) -> dict:
     """항목별 적합도(각 0~1). 가중치를 곱하기 전 값이라, 이 코스가 무엇 때문에 추천됐는지
     보여줄 때와 만족도로 사용자 가중치를 학습할 때 쓴다."""
-    from .environment import environment_score
-
-    return {
+    scores = {
         "distance": distance_match(course, user),
-        "elevation": elevation_match(course, user),
         "safety": safety_match(course, user),
         "signal_free": signal_free_match(course, user),
         "tag_match": tag_match(course, user),
         "time_fit": time_fit_match(course, user),
-        "environment": environment_score(env_context or {}),
     }
+    if ELEVATION_ENABLED:
+        scores["elevation"] = elevation_match(course, user)
+    return scores
 
 
-def score_course(course: dict, user: dict, weights: dict = None, env_context: dict = None) -> float:
-    if weights is None:
-        weights = DEFAULT_WEIGHTS_WITH_ENV if env_context is not None else DEFAULT_WEIGHTS
-    # 사용자별로 학습된 가중치가 오더라도 목적·동반자에 따른 조정은 그 위에 얹는다
-    weights = tune_weights(weights, user.get("purpose"))
-    weights = tune_for_companion(weights, user.get("companion"))
-
-    scores = component_scores(course, user, env_context)
-    return sum(scores[k] * weights[k] for k in weights)
+def score_course(course: dict, user: dict, weights: dict = None) -> float:
+    weights = weights or default_weights()
+    scores = component_scores(course, user)
+    used = {k: w for k, w in weights.items() if k in scores}   # 꺼진 항목(예전 프로필의 날씨·고도)은 빼고
+    total = sum(used.values()) or 1.0
+    return sum(scores[k] * w for k, w in used.items()) / total
 
 
 def filter_by_required_tags(courses: list, user: dict) -> list:
     """environment_tags가 있으면, 그중 하나라도 겹치는 코스만 남긴다.
 
     tag_match는 score_course()의 가중치 중 하나(25%)일 뿐이라, 사용자가 "바다뷰"를 골라도
-    바다가 전혀 없는 코스가 다른 점수(거리/고도/안전)만으로 순위에 끼어드는 문제가 있었다.
+    바다가 전혀 없는 코스가 다른 점수(거리/안전 등)만으로 순위에 끼어드는 문제가 있었다.
     명시적으로 고른 태그는 소프트 가중치가 아니라 필수 조건으로 다뤄야 실사용에 맞다.
     """
     user_tags = set(user.get("environment_tags", []))
@@ -143,22 +141,13 @@ def filter_by_required_tags(courses: list, user: dict) -> list:
     return [c for c in courses if c.get("scenery_pending") or user_tags & set(c.get("tags", []))]
 
 
-def recommend(courses: list, user: dict, top_n: int = 5, weights: dict = None, env_context_map: dict = None) -> list:
+def recommend(courses: list, user: dict, top_n: int = 5, weights: dict = None) -> list:
     """(course, score) 튜플 리스트를 점수 내림차순으로 반환.
 
     사용자가 environment_tags를 지정하면 그 태그를 하나도 안 가진 코스는 결과에서 제외한다
-    (예: "바다뷰"를 골랐는데 내륙 코스가 뜨는 것을 방지). 남는 후보끼리는 기존 가중치 점수로 정렬.
-    env_context_map: {course_id: environment_context} 를 주면 실시간 날씨/대기질을 점수에 반영.
+    (예: "바다뷰"를 골랐는데 내륙 코스가 뜨는 것을 방지). 남는 후보끼리는 가중치 점수로 정렬.
     """
     candidates = filter_by_required_tags(courses, user)
-    companion = user.get("companion")
-    if companion:
-        # 유아차에 200m 오르막은 "덜 어울리는 정도"가 아니라 불가능한 코스다 — 점수가 아니라 제외로 다룬다
-        target_km = resolve_target_distance_km(user)
-        candidates = [c for c in candidates if fits_companion(c, companion, target_km)]
-    scored = [
-        (c, score_course(c, user, weights, env_context=(env_context_map or {}).get(c["id"]) if env_context_map else None))
-        for c in candidates
-    ]
+    scored = [(c, score_course(c, user, weights)) for c in candidates]
     scored.sort(key=lambda pair: pair[1], reverse=True)
     return scored[:top_n]

@@ -5,7 +5,7 @@
 없으니 실제로 뛰고 난 평가에서 배운다.
 
 학습 방식 (지수 경사 가중치 갱신, exponentiated gradient):
-  코스마다 항목별 적합도(거리·고도·안전·신호등·풍경·시간대·날씨, 각 0~1)가 있다.
+  코스마다 항목별 적합도(거리·풍경·신호등·안전·시간대, 각 0~1)가 있다. 고도는 정확한 데이터가 생기면 켠다.
   만족도가 높은데 그 코스가 특히 강했던 항목이 있으면 → 그 항목이 이 사람에게 중요하다는 증거.
   만족도가 낮은데 강했던 항목이 있으면 → 그건 이 사람에게 별로 중요하지 않다는 증거.
 
@@ -28,7 +28,7 @@ import math
 import os
 import threading
 
-from .score import DEFAULT_WEIGHTS_WITH_ENV
+from .score import ELEVATION_ENABLED, default_weights
 
 PROFILES_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "user_profiles.json")
 
@@ -45,7 +45,6 @@ FACTOR_LABELS = {
     "signal_free": "신호등에 덜 걸리는 코스",
     "tag_match": "고른 풍경(바다뷰·숲길 등)",
     "time_fit": "지금 시간대에 어울리는 코스",
-    "environment": "날씨가 좋은 코스",
 }
 
 # 러닝 후 항목별 질문. 앱이 문항을 하드코딩하지 않도록 서버가 내려준다 (GET /onboarding/feedback).
@@ -53,7 +52,7 @@ FACTOR_LABELS = {
 #   중요도 변화: 불만(+1)은 그 항목이 이 사람에게 중요하다는 강한 증거, 칭찬(+0.5)은 약한 증거,
 #               "보통"(-0.25)은 별로 신경 쓰지 않았다는 증거. "딱 좋았다"는 목표가 맞았다는 뜻이라 0.
 #   방향: 목표값을 올릴지(+1) 내릴지(-1). 오르막과 거리에만 있다.
-FEEDBACK_QUESTIONS = [
+ALL_FEEDBACK_QUESTIONS = [
     {"key": "distance", "factor": "distance", "question": "거리는 어땠나요?", "options": [
         ("short", "짧았어요", 1.0, +1), ("good", "딱 좋았어요", 0.0, 0), ("long", "길었어요", 1.0, -1)]},
     {"key": "elevation", "factor": "elevation", "question": "오르막은 어땠나요?", "options": [
@@ -65,6 +64,8 @@ FEEDBACK_QUESTIONS = [
     {"key": "safety", "factor": "safety", "question": "달리는 동안 안심됐나요?", "options": [
         ("safe", "안심됐어요", 0.5, 0), ("ok", "보통이었어요", -0.25, 0), ("unsafe", "불안했어요", 1.0, 0)]},
 ]
+# 고도가 꺼져 있으면 오르막은 묻지 않는다 (잴 수 없는 걸 물어 학습하면 엉뚱한 걸 배운다)
+FEEDBACK_QUESTIONS = [q for q in ALL_FEEDBACK_QUESTIONS if ELEVATION_ENABLED or q["key"] != "elevation"]
 _ANSWERS = {q["key"]: {value: (q["factor"], importance, direction) for value, _, importance, direction in q["options"]}
             for q in FEEDBACK_QUESTIONS}
 ASPECT_RATE = 0.5              # 항목별 답의 학습률 = 별점 학습률 × 이 값
@@ -123,7 +124,8 @@ def answers_view(profile: dict) -> list:
 
 def answer_labels(aspects: dict) -> list:
     """{"stops": "many"} → ["자주 멈췄어요"] (이력을 사람이 읽을 수 있게)."""
-    labels = {q["key"]: {value: label for value, label, _, _ in q["options"]} for q in FEEDBACK_QUESTIONS}
+    # 예전에 답한 오르막 같은, 지금은 묻지 않는 문항의 답도 이력에서는 읽을 수 있게 전체 문항으로 본다
+    labels = {q["key"]: {value: label for value, label, _, _ in q["options"]} for q in ALL_FEEDBACK_QUESTIONS}
     return [labels[key][value] for key, value in (aspects or {}).items() if value in labels.get(key, {})]
 
 
@@ -145,7 +147,7 @@ def taste_summary(profile: dict) -> list:
         lines.append("풍경 좋은 코스를 좋아하세요.")
     if said("safety", "unsafe"):
         lines.append(f"불안하게 느낀 코스가 있었어요 ({said('safety', 'unsafe')}번). 사람 왕래가 있고 밝은 길을 먼저 추천해요.")
-    elevation = profile.get("elevation_scale", 1.0)
+    elevation = profile.get("elevation_scale", 1.0) if ELEVATION_ENABLED else 1.0
     if elevation <= 0.9:
         lines.append(f"오르막을 힘들어하셔서 고른 것보다 {round((1 - elevation) * 100)}% 완만한 코스를 찾아요.")
     elif elevation >= 1.1:
@@ -162,7 +164,7 @@ def new_profile(user_id: str, survey: dict = None) -> dict:
     return {
         "user_id": user_id,
         "survey": dict(survey or {}),
-        "weights": dict(DEFAULT_WEIGHTS_WITH_ENV),
+        "weights": default_weights(),
         "n_feedback": 0,
         "recent": {},  # course_id -> 추천 당시 항목별 적합도 (평가가 오면 이걸로 학습)
     }
@@ -231,14 +233,18 @@ def learn(profile: dict, component_scores: dict, rating: int, baseline: dict = N
     return profile
 
 
-def weights_for(profile: dict, with_environment: bool) -> dict:
-    """점수 계산에 쓸 가중치. 실시간 날씨를 안 쓰면 날씨 항목을 빼고 다시 합을 1로 맞춘다."""
-    weights = dict(profile["weights"])
-    if not with_environment:
-        weights.pop("environment", None)
-        total = sum(weights.values())
-        weights = {k: v / total for k, v in weights.items()}
-    return weights
+def weights_for(profile: dict) -> dict:
+    """점수 계산에 쓸 이 사람의 가중치."""
+    return dict(profile["weights"])
+
+
+def _only_active(weights: dict) -> dict:
+    """지금 쓰는 항목의 가중치만 남겨 합을 1로 맞춘다. 예전 프로필에는 날씨·고도 가중치가 있다.
+    새로 생긴 항목(고도를 다시 켜면)은 기본값으로 채운다."""
+    base = default_weights()
+    kept = {k: weights.get(k, base[k]) for k in base}
+    total = sum(kept.values()) or 1.0
+    return {k: v / total for k, v in kept.items()}
 
 
 def remember_recommendation(profile: dict, course_id: str, component_scores: dict,
@@ -270,13 +276,14 @@ def explain(profile: dict) -> list:
     나왔었다). 그래서 기본값 대비 배율의 로그를 보고, 그중 가운데 값(=학습에 안 걸린 항목들이
     공통으로 받은 정규화 몫)을 빼서 "실제로 더/덜 중시하게 된 정도"를 preference로 준다.
     """
-    ratios = {k: math.log(w / DEFAULT_WEIGHTS_WITH_ENV[k])
-              for k, w in profile["weights"].items() if DEFAULT_WEIGHTS_WITH_ENV.get(k)}
+    base_weights = default_weights()
+    ratios = {k: math.log(w / base_weights[k])
+              for k, w in profile["weights"].items() if base_weights.get(k)}
     neutral = sorted(ratios.values())[len(ratios) // 2] if ratios else 0.0
 
     rows = []
     for k, w in profile["weights"].items():
-        base = DEFAULT_WEIGHTS_WITH_ENV.get(k, 0)
+        base = base_weights.get(k, 0)
         rows.append({
             "factor": k,
             "label": FACTOR_LABELS.get(k, k),
@@ -303,11 +310,14 @@ def load_profile(user_id: str, path=None):
         with _lock:
             return _read_all(path).get(user_id)
     profile = user_store.get_profile(user_id)
+    if profile is not None:
+        profile["weights"] = _only_active(profile["weights"])
     if profile is None:
         # 예전에는 JSON 파일 하나에 모든 사용자를 넣어 두었다. 거기 있던 사람은 처음 찾을 때 옮겨 온다
         with _lock:
             profile = _read_all(PROFILES_PATH).get(user_id)
         if profile is not None:
+            profile["weights"] = _only_active(profile["weights"])
             user_store.put_profile(profile)
             forget_legacy(user_id)
     return profile

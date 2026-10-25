@@ -38,3 +38,12 @@ data/osm_local/
 
 # Tmap으로 확인한 길별 인도 유무 (쓰면서 쌓인다)
 data/sidewalk_facts.sqlite
+
+# 공공 지도 데이터 원본 (국토지리정보원 등, 용량이 커서 올리지 않음)
+data/public_map/
+
+# 한 번 물어본 땅 높이 (Open Topo Data, 다시 받을 수 있음)
+data/elevation_cache.sqlite
+
+# 평가 스크립트(python -m src.evaluate) 실행 결과 — 다시 만들 수 있음
+data/evaluation/

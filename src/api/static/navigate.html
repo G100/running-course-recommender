@@ -63,6 +63,11 @@
   .stage{ display:flex; flex-direction:column; align-items:center; gap:14px; min-width:0; }
   .status{ font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--muted); min-height:18px; align-self:flex-start; }
   .status.live{ color:var(--accent); }
+  .choice{ align-self:stretch; border:1px solid var(--line); border-radius:12px; background:var(--paper); padding:10px 12px; font-size:13.5px; }
+  .choice p{ margin:0 0 8px; }
+  .choice div{ display:flex; flex-wrap:wrap; gap:6px; }
+  .choice button{ font:inherit; font-size:13px; border:1px solid var(--line); border-radius:999px; padding:5px 12px; background:var(--paper); cursor:pointer; }
+  .choice button.yes{ background:var(--accent); border-color:var(--accent); color:#fff; }
 
   /* ---- 폰 프레임: 실제 내비게이션 앱처럼 세로 화면으로 보여준다 ---- */
   .phone{
@@ -102,7 +107,13 @@
     position:absolute; top:8px; left:18px; font-size:10.5px; font-weight:700;
     background:rgba(255,255,255,.18); padding:3px 9px; border-radius:999px; letter-spacing:.02em;
   }
-  .turn-primary .arrow{ font-size:46px; font-weight:800; line-height:1; width:56px; text-align:center; flex-shrink:0; text-shadow:0 2px 6px rgba(0,0,0,.25); }
+  .turn-primary .arrow{ font-size:46px; font-weight:800; line-height:1; width:56px; height:56px; text-align:center; flex-shrink:0; text-shadow:0 2px 6px rgba(0,0,0,.25); }
+  .turn-svg{ width:100%; height:100%; overflow:visible; filter:drop-shadow(0 2px 4px rgba(0,0,0,.25)); }
+  .turn-svg path{ fill:none; stroke:currentColor; stroke-width:7; stroke-linecap:round; stroke-linejoin:round; }
+  .turn-svg .head{ transform-origin:28px 31px; transition:transform .45s cubic-bezier(.2,.8,.2,1); }
+  .turn-secondary .arrow{ width:18px; height:18px; }
+  .turn-secondary .turn-svg path{ stroke-width:8; }
+  @media (prefers-reduced-motion: reduce){ .turn-svg .head{ transition:none; } }
   .turn-primary .meta{ min-width:0; }
   .turn-primary .dist{ font-family:"IBM Plex Mono",monospace; font-size:34px; font-weight:600; line-height:1.05; font-variant-numeric:tabular-nums; }
   .turn-primary .street{ font-size:14px; font-weight:500; opacity:.92; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -113,7 +124,7 @@
     display:flex; align-items:center; gap:10px; font-size:12.5px;
     box-shadow:0 6px 16px -6px rgba(0,0,0,.4);
   }
-  .turn-secondary .arrow{ font-size:16px; flex-shrink:0; }
+  .turn-secondary .arrow{ font-size:16px; flex-shrink:0; display:inline-block; }
   .turn-secondary .txt{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
   /* 경로 확인 시트 (내비게이션 시작 전, 하단에 뜨는 카드) */
@@ -249,15 +260,6 @@
       </div>
 
       <div class="field">
-        <label>고도 선호</label>
-        <div class="seg" id="elevSeg">
-          <button data-v="low">완만</button>
-          <button data-v="medium" class="on">보통</button>
-          <button data-v="high">언덕</button>
-        </div>
-      </div>
-
-      <div class="field">
         <label>원하는 풍경</label>
         <div class="chips" id="tagChips" aria-live="polite"></div>
         <p class="hint" id="tagHint">달리고 싶은 풍경을 골라 보세요. 지금 위치 근처에 있는 것만 보여드려요.</p>
@@ -274,28 +276,34 @@
       </div>
 
       <div class="field">
-        <label for="destInput">목적지 (선택)</label>
-        <input id="destInput" type="text" autocomplete="off" placeholder="장소 이름을 입력하고 목록에서 고르세요">
-        <ul class="places" id="placeList" hidden></ul>
-        <p class="hint" id="destNote">비워 두면 조건에 맞는 코스를 추천합니다.</p>
-      </div>
-
-      <div class="field">
-        <label>현위치</label>
+        <label for="startInput">출발지</label>
         <div class="locbtns" id="locBtns">
           <button id="myLocBtn" data-mine="1">내 현재 위치 사용 <span class="d" id="myLocNote">· 브라우저 위치 권한 필요</span></button>
           <button data-lat="34.7393" data-lng="127.7359" class="on">여수 이순신광장 <span class="d">· 근처에 DB 코스 있음</span></button>
           <button data-lat="35.1565" data-lng="126.8386">광주 상무지구 <span class="d">· 근처에 DB 코스 있음</span></button>
           <button data-lat="35.1595" data-lng="129.1604">부산 해운대 <span class="d">· DB에 없음 → 실시간 생성</span></button>
         </div>
+        <input id="startInput" type="text" autocomplete="off" placeholder="다른 출발지: 장소 이름을 입력하고 목록에서 고르세요" style="margin-top:8px">
+        <ul class="places" id="startList" hidden></ul>
+        <p class="hint" id="startNote">위 버튼 중 하나를 고르거나, 원하는 출발지를 검색하세요.</p>
+      </div>
+
+
+      <!-- 목적지 지정은 잠시 숨긴다: 지금은 출발지만 정해 그 자리에서 도는 코스를 시험한다 -->
+      <div class="field" hidden>
+        <label for="destInput">목적지 (선택)</label>
+        <input id="destInput" type="text" autocomplete="off" placeholder="장소 이름을 입력하고 목록에서 고르세요">
+        <ul class="places" id="placeList" hidden></ul>
+        <p class="hint" id="destNote">비워 두면 조건에 맞는 코스를 추천합니다.</p>
       </div>
 
       <button class="go" id="goBtn">코스 추천받기</button>
-      <p class="hint">"내 현재 위치 사용"을 누르면 실제 위치로, 아래 세 곳은 정해 둔 위치로 요청합니다. 반경 5km 안에 저장된 코스가 있으면 즉시 매칭되고, 없으면 서버가 그 자리에서 코스를 만듭니다 — 10초 정도 걸립니다.</p>
+      <p class="hint">"내 현재 위치 사용"을 누르면 실제 위치로, 세 곳 버튼은 정해 둔 위치로, 검색해서 고르면 그 장소에서 출발합니다. 반경 5km 안에 저장된 코스가 있으면 즉시 매칭되고, 없으면 서버가 그 자리에서 코스를 만듭니다 — 10초 정도 걸립니다.</p>
     </div>
 
     <div class="stage">
       <div class="status" id="status">왼쪽에서 조건을 고르고 "코스 추천받기"를 눌러보세요.</div>
+      <div class="choice" id="choiceBox" hidden></div>
 
       <div class="phone">
         <div class="phone-map">
@@ -326,7 +334,6 @@
           <div><span class="name" id="courseName">—</span><span class="region" id="courseRegion"></span></div>
           <div class="stats">
             <div><div class="n" id="statDist">—</div><div class="l">km</div></div>
-            <div><div class="n" id="statElev">—</div><div class="l">m 상승</div></div>
             <div><div class="n" id="statSignal">—</div><div class="l">신호등</div></div>
             <div><div class="n" id="statScore">—</div><div class="l">매칭점수</div></div>
           </div>
@@ -376,7 +383,7 @@
       </section>
     </div>
   </div>
-  <footer>추천 점수는 score.py 가중치 그대로 서버에서 계산 · 경로와 턴바이턴 안내: Tmap API 실제 응답 · 지도: MapLibre + OpenFreeMap(OSM) 3D · 음성: 브라우저 내장 합성</footer>
+  <footer>추천 점수는 score.py 가중치 그대로 서버에서 계산 · 경로와 턴바이턴 안내: Tmap API 실제 응답 · 지도: Tmap 벡터 지도 (키가 없으면 MapLibre + OpenFreeMap) · 음성: 브라우저 내장 합성</footer>
 </div>
 
 <!-- 지도 렌더링만 MapLibre로 바꿨다. Tmap 웹 SDK(V2)는 2D 래스터뿐이라 기울기·3D 건물·진행방향
@@ -385,8 +392,9 @@
      타일은 OpenFreeMap(키 불필요·무료·무제한, OSM 기반)을 쓴다. -->
 <link href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.js"></script>
+{{TMAP_MAP_SCRIPT}}
 <script>
-let map, polyline, runnerOverlay, animTimer, watchId = null;
+let animTimer, watchId = null;
 let selectedLoc = { lat: 34.7393, lng: 127.7359 };
 const PACE_MIN_PER_KM = 6; // 실제 서비스라면 사용자 평균 페이스로 대체
 
@@ -439,6 +447,32 @@ function locateStepsOnPath(steps, path, cum){
 
 const TURN_ICON = { 11:'↑', 12:'↰', 13:'↱', 14:'↩', 200:'●', 201:'🏁', 212:'⤴', 213:'⤴' };
 function turnIconFor(turnType){ return TURN_ICON[turnType] || '↑'; }
+// 안내 화살표는 기호(↱) 대신 실제로 꺾이는 각도대로 그린다 — 살짝 꺾이면 살짝, 크게 꺾이면 크게.
+// 줄기는 그대로 두고 머리만 돌려서, 다음 안내로 바뀔 때 부드럽게 돌아간다.
+function setTurnArrow(el, step){
+  if (step.turn_type === 201){ if (el.dataset.kind !== 'flag'){ el.innerHTML = '🏁'; el.dataset.kind = 'flag'; } return; }
+  if (el.dataset.kind !== 'arrow'){
+    el.innerHTML = '<svg class="turn-svg" viewBox="0 0 56 56" aria-hidden="true"><path d="M28 52 V31"/>' +
+      '<g class="head"><path d="M28 31 V10"/><path d="M19 19 L28 9 L37 19"/></g></svg>';
+    el.dataset.kind = 'arrow';
+  }
+  el.querySelector('.head').style.transform = `rotate(${Math.max(-150, Math.min(150, step.angle || 0))}deg)`;
+  el.setAttribute('aria-label', step.instruction || step.description);
+}
+// 각 안내 지점에서 경로가 실제로 얼마나 꺾이는지 (-180~180, 오른쪽이 +). 앞뒤 15m를 본다.
+function turnAngles(steps, path, cum){
+  steps.forEach(st => {
+    const at = pointAtDistance(path, cum, st.cumDistance);
+    const before = pointAtDistance(path, cum, st.cumDistance - 15), after = pointAtDistance(path, cum, st.cumDistance + 15);
+    const inB = bearing([before.lat, before.lng], [at.lat, at.lng]), outB = bearing([at.lat, at.lng], [after.lat, after.lng]);
+    let angle = ((outB - inB + 540) % 360) - 180;
+    if (Math.abs(angle) < 15) angle = 0;                 // 거의 곧은 길은 곧게
+    // 경로 모양으로 알 수 없을 때(출발점 등)는 Tmap이 준 방향을 쓴다
+    if (!angle){ angle = { 12: -90, 13: 90, 14: -180, 16: -135, 17: -45, 18: 45, 19: 135, 212: -90, 213: 90 }[st.turn_type] || 0; }
+    st.angle = angle;
+  });
+  return steps;
+}
 function fmtDist(m){ return m >= 1000 ? (m/1000).toFixed(1)+'km' : Math.round(m)+'m'; }
 function fmtKoreanTime(d){
   let h = d.getHours(), m = d.getMinutes();
@@ -470,7 +504,8 @@ function announce(step, remainingM){
   const key = `${step.cum_m ?? step.cumDistance}|${stage}`;
   if (key === spokenKey) return;
   spokenKey = key;
-  speak(stage === 'now' ? step.description : `${fmtDist(remainingM)} 앞 ${step.description}`);
+  const say = step.instruction || step.description;
+  speak(stage === 'now' ? say : `${fmtDist(remainingM)} 앞에서 ${say}`);
 }
 
 function updateTurnBanner(locatedSteps, distanceSoFarM){
@@ -478,25 +513,26 @@ function updateTurnBanner(locatedSteps, distanceSoFarM){
   const secondary = document.getElementById('turnSecondary');
   if (!locatedSteps.length){ primary.hidden = true; secondary.hidden = true; return; }
 
-  const nextIdx = locatedSteps.findIndex(s => s.cumDistance > distanceSoFarM + 0.5);
+  // '직진' 안내(Tmap이 건널목마다 넣는다)는 화면에 띄우지 않는다 — 다음에 할 일(회전·횡단보도)을 보여 준다
+  const nextIdx = locatedSteps.findIndex(s => s.cumDistance > distanceSoFarM + 0.5 && s.turn_type !== 11);
   if (nextIdx === -1){
     primary.hidden = true; secondary.hidden = true;
     return;
   }
   const next = locatedSteps[nextIdx];
-  const after = locatedSteps[nextIdx+1];
+  const after = locatedSteps.slice(nextIdx + 1).find(s => s.turn_type !== 11);
 
   const remainingM = next.cumDistance - distanceSoFarM;
   primary.hidden = false;
-  document.getElementById('turnArrow').textContent = turnIconFor(next.turn_type);
+  setTurnArrow(document.getElementById('turnArrow'), next);
   document.getElementById('turnDist').textContent = fmtDist(remainingM);
-  document.getElementById('turnStreet').textContent = next.description;
+  document.getElementById('turnStreet').textContent = next.instruction || next.description;
   announce(next, remainingM);
 
   if (after){
     secondary.hidden = false;
-    document.getElementById('turnArrow2').textContent = turnIconFor(after.turn_type);
-    document.getElementById('turnNext').textContent = after.description;
+    setTurnArrow(document.getElementById('turnArrow2'), after);
+    document.getElementById('turnNext').textContent = '그다음 ' + (after.instruction || after.description);
   } else {
     secondary.hidden = true;
   }
@@ -518,57 +554,139 @@ function markerEl(url, size){
   return el;
 }
 
+// 지도는 Tmap 벡터 지도(Tmapv3)를 쓴다 — 한글 지명이 또렷하고, 경로·안내도 Tmap이라 한 벌로 보인다.
+// 서버에 Tmap 키가 없으면 예전처럼 MapLibre + OpenFreeMap으로 그린다. 두 쪽 다 같은 함수로 부른다.
+const mapView = window.Tmapv3 ? tmapView() : maplibreView();
+
+function tmapView(){
+  let m = null, ready = false, queue = [];
+  let marks = [], routeLines = [], planLine = null, runner = null, lastPath = null;
+  const LL = p => new Tmapv3.LatLng(p[0], p[1]);
+  const dot = color => 'data:image/svg+xml,' + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="12" cy="12" r="8" fill="${color}" stroke="#fff" stroke-width="3"/></svg>`);
+  const when = fn => ready ? fn() : queue.push(fn);
+  const line = (path, color, weight, opacity = 1) =>
+    new Tmapv3.Polyline({ path: path.map(LL), strokeColor: color, strokeWeight: weight, strokeOpacity: opacity, map: m });
+  function ensure(center){
+    if (m) return;
+    m = new Tmapv3.Map('map', { center: LL(center), width: '100%', height: '100%', zoom: 15 });
+    m.on('ConfigLoad', () => { ready = true; queue.splice(0).forEach(fn => fn()); });
+  }
+  function drawRoute(path){
+    routeLines.forEach(l => l.setMap(null));
+    // 경로 아래에 어두운 테두리를 한 겹 깔아야 밝은 지도 위에서도 선이 또렷하게 읽힌다
+    routeLines = [line(path, '#1B4F9C', 11), line(path, '#3E8CFF', 6)];
+    lastPath = path;
+  }
+  function fit(path){
+    const bounds = new Tmapv3.LatLngBounds(LL(path[0]));
+    path.forEach(p => bounds.extend(LL(p)));
+    m.fitBounds(bounds, 46);
+  }
+  return {
+    draw(path){
+      ensure(path[0]);
+      when(() => {
+        [...marks, ...routeLines].forEach(o => o.setMap(null));
+        if (planLine){ planLine.setMap(null); planLine = null; }
+        m.setBearing(0); m.setPitch(0);
+        drawRoute(path);
+        const size = new Tmapv3.Size(24, 24);
+        marks = [new Tmapv3.Marker({ position: LL(path[0]), icon: dot('#16794A'), iconSize: size, map: m }),
+                 new Tmapv3.Marker({ position: LL(path[path.length - 1]), icon: dot('#B03030'), iconSize: size, map: m })];
+        runner = new Tmapv3.Marker({ position: LL(path[0]), icon: RUNNER_ICON_URL, iconSize: new Tmapv3.Size(26, 26), map: m });
+        marks.push(runner);
+        fit(path);
+      });
+    },
+    setRoute(path){ when(() => drawRoute(path)); },
+    setPlan(path){
+      when(() => {
+        if (planLine) planLine.setMap(null);
+        planLine = line(path, '#F0A23A', 18, 0.4);
+        if (lastPath) drawRoute(lastPath);   // 원래 코스 띠는 Tmap 경로 밑에 깐다
+      });
+    },
+    runner(lat, lng){ if (runner) runner.setPosition(LL([lat, lng])); },
+    navStart(){ when(() => { m.setZoom(Math.round(NAV_ZOOM)); m.setPitch(Math.min(NAV_PITCH, 60)); }); },   // Tmap 지도는 60도까지
+    frame(lat, lng, heading){
+      // 매 화면 프레임마다 부른다 — 애니메이션을 겹쳐 걸지 않고 바로 옮긴다(부드러움은 호출 쪽 보간이 만든다)
+      if (!ready) return;
+      if (runner) runner.setPosition(LL([lat, lng]));
+      m.setCenter(LL([lat, lng]));
+      m.setBearing(heading);
+    },
+    recenter(){ if (runner) when(() => m.setCenter(runner.getPosition())); },
+  };
+}
+
+function maplibreView(){
+  let map = null, runnerOverlay = null;
+  const line = path => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: path.map(p => [p[1], p[0]]) } });
+  const onLoad = fn => { if (map.getSource('route')) fn(); else map.once('load', fn); };
+  return {
+    draw(path){
+      if (map){ map.remove(); map = null; }
+      const coords = path.map(p => [p[1], p[0]]);  // MapLibre는 [lng, lat] 순서
+      map = new maplibregl.Map({
+        container: 'map',
+        style: 'https://tiles.openfreemap.org/styles/bright',
+        center: coords[0], zoom: 15, pitch: 0, bearing: 0,
+        attributionControl: { compact: true },
+      });
+      new maplibregl.Marker({ color: '#16794A' }).setLngLat(coords[0]).addTo(map);
+      new maplibregl.Marker({ color: '#B03030' }).setLngLat(coords[coords.length-1]).addTo(map);
+      runnerOverlay = new maplibregl.Marker({ element: markerEl(RUNNER_ICON_URL, 26) }).setLngLat(coords[0]).addTo(map);
+      map.on('load', () => {
+        map.addSource('route', { type: 'geojson', data: line(path) });
+        map.addLayer({ id: 'route-casing', type: 'line', source: 'route',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#1B4F9C', 'line-width': 11, 'line-opacity': 0.9 } });
+        map.addLayer({ id: 'route-line', type: 'line', source: 'route',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#3E8CFF', 'line-width': 6 } });
+        // 3D 건물. OSM에 높이가 있는 건물은 실제 높이로, 없으면 낮은 기본값으로 세운다.
+        map.addLayer({
+          id: '3d-buildings', source: 'openmaptiles', 'source-layer': 'building',
+          type: 'fill-extrusion', minzoom: 14,
+          paint: {
+            'fill-extrusion-color': '#c9ccd4',
+            'fill-extrusion-height': ['coalesce', ['get','render_height'], ['get','height'], 10],
+            'fill-extrusion-base': ['coalesce', ['get','render_min_height'], 0],
+            'fill-extrusion-opacity': 0.9,
+          },
+        });
+        const bounds = coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
+        map.fitBounds(bounds, { padding: 46, duration: 0 });
+      });
+    },
+    setRoute(path){ if (map) onLoad(() => map.getSource('route').setData(line(path))); },
+    setPlan(path){
+      if (!map) return;
+      onLoad(() => {
+        if (map.getSource('plan')) return map.getSource('plan').setData(line(path));
+        map.addSource('plan', { type: 'geojson', data: line(path) });
+        map.addLayer({ id: 'plan-line', type: 'line', source: 'plan', layout: { 'line-cap': 'round', 'line-join': 'round' },
+                       paint: { 'line-color': '#F0A23A', 'line-width': 18, 'line-opacity': 0.4 } }, 'route-casing');
+      });
+    },
+    runner(lat, lng){ if (runnerOverlay) runnerOverlay.setLngLat([lng, lat]); },
+    navStart(){ if (map) map.jumpTo({ zoom: NAV_ZOOM, pitch: NAV_PITCH }); },
+    frame(lat, lng, heading){
+      if (!map) return;
+      if (runnerOverlay) runnerOverlay.setLngLat([lng, lat]);
+      map.jumpTo({ center: [lng, lat], bearing: heading });
+    },
+    recenter(){ if (runnerOverlay && map) map.easeTo({ center: runnerOverlay.getLngLat(), duration: 400 }); },
+  };
+}
+
 function drawCourse(course){
   document.getElementById('emptyState').hidden = true;
-  if (map){ map.remove(); map = null; }
-
-  const coords = course.path.map(p => [p[1], p[0]]);  // MapLibre는 [lng, lat] 순서
-  map = new maplibregl.Map({
-    container: 'map',
-    style: 'https://tiles.openfreemap.org/styles/bright',
-    center: coords[0], zoom: 15, pitch: 0, bearing: 0,
-    attributionControl: { compact: true },
-  });
-
-  new maplibregl.Marker({ color: '#16794A' }).setLngLat(coords[0]).addTo(map);
-  new maplibregl.Marker({ color: '#B03030' }).setLngLat(coords[coords.length-1]).addTo(map);
-  runnerOverlay = new maplibregl.Marker({ element: markerEl(RUNNER_ICON_URL, 26) })
-    .setLngLat(coords[0]).addTo(map);
-
-  map.on('load', () => {
-    map.addSource('route', {
-      type: 'geojson',
-      data: { type: 'Feature', geometry: { type: 'LineString', coordinates: coords } },
-    });
-    // 경로 아래에 어두운 테두리를 한 겹 깔아야 밝은 지도 위에서도 선이 또렷하게 읽힌다
-    map.addLayer({ id: 'route-casing', type: 'line', source: 'route',
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#1B4F9C', 'line-width': 11, 'line-opacity': 0.9 } });
-    map.addLayer({ id: 'route-line', type: 'line', source: 'route',
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#3E8CFF', 'line-width': 6 } });
-
-    // 3D 건물. OSM에 높이가 있는 건물은 실제 높이로, 없으면 낮은 기본값으로 세운다.
-    map.addLayer({
-      id: '3d-buildings', source: 'openmaptiles', 'source-layer': 'building',
-      type: 'fill-extrusion', minzoom: 14,
-      paint: {
-        'fill-extrusion-color': '#c9ccd4',
-        'fill-extrusion-height': ['coalesce', ['get','render_height'], ['get','height'], 10],
-        'fill-extrusion-base': ['coalesce', ['get','render_min_height'], 0],
-        'fill-extrusion-opacity': 0.9,
-      },
-    });
-
-
-    const bounds = coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
-    map.fitBounds(bounds, { padding: 46, duration: 0 });
-  });
+  mapView.draw(course.path);
 }
 
-function recenterOnRunner(){
-  if (runnerOverlay && map) map.easeTo({ center: runnerOverlay.getLngLat(), duration: 400 });
-}
+function recenterOnRunner(){ mapView.recenter(); }
 
 function fmt(n, d=1){ return Number(n).toFixed(d); }
 
@@ -583,12 +701,16 @@ function showRouteSheet(course, score){
   // 코스가 실제로 지나는 풍경을 쉬운 이름으로 같이 보여준다 (예: 여수 · 바다 · 공원)
   document.getElementById('courseRegion').textContent = [course.region, ...(course.scenery_labels || [])].join(' · ');
   document.getElementById('statDist').textContent = fmt(course.distance_km);
-  document.getElementById('statElev').textContent = Math.round(course.elevation_gain_m);
   document.getElementById('statSignal').textContent = course.traffic_signal_count;
   document.getElementById('statScore').textContent = Math.round(score*100);
 
   const notes = [];
   if (course._source === 'generated') notes.push(`실시간 생성됨 · 다음부터 이 지역은 즉시 매칭`);
+  if (course.tmap){
+    const asked = parseFloat(document.getElementById('dist').value);
+    const off = Math.round((course.distance_km - asked) / asked * 100);
+    notes.push(`실제로 달릴 경로(Tmap) ${course.distance_km}km · 요청 ${asked}km 대비 ${off >= 0 ? '+' : ''}${off}%`);
+  }
   if (course.road_mix){
     // 차도가 아니라 사람이 다니는 길로 가는지. 인도 없는 차도를 지나는 코스는 서버가 내보내지 않는다.
     const m = course.road_mix, pct = v => Math.round((v || 0) * 100);
@@ -596,6 +718,7 @@ function showRouteSheet(course, score){
       + (m.alley >= 0.005 ? ` · 골목 ${pct(m.alley)}%` : '') + ' · 차도 0%');
   }
   if (course.planned_for_night) notes.push(`밤 코스 · 사람 있는 길 ${Math.round((course.lively_ratio || 0) * 100)}% · 인적 드문 길 ${Math.round((course.secluded_ratio || 0) * 100)}%`);
+  if (window._attribution) notes.push(window._attribution);
   if (course.access_m) notes.push(`코스 시작점까지 걸어서 ${course.access_m}m`);
   if (course.trimmed) notes.push(`원래 ${course.original_distance_km}km 코스를 요청 거리만큼 앞부분만 표시 (중간에 돌아오면 됨)`);
   document.getElementById('routeNote').textContent = notes.join(' · ');
@@ -603,58 +726,104 @@ function showRouteSheet(course, score){
 
 // GPS 좌표가 경로 위 어디쯤인지(누적거리, 경로 이탈거리) 찾는다 — 턴바이턴 매칭 로직은
 // 시뮬레이션과 실제 GPS 모드가 완전히 동일하게 쓴다. 다른 건 "위치를 어디서 받아오느냐"뿐이다.
-function nearestProgressOnPath(latlng, path, cum){
-  let bestI = 0, bestD = Infinity;
-  for (let i=0;i<path.length;i++){
-    const d = haversine(latlng, path[i]);
-    if (d < bestD){ bestD = d; bestI = i; }
-  }
-  return { cumDistance: cum[bestI], offTrackM: bestD };
-}
-
 function enterNavMode(){
   document.getElementById('rateCard').hidden = true;
-  clearInterval(animTimer);
+  stopNavLoop();
   if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
   document.getElementById('routeSheet').hidden = true;
   document.getElementById('bottomBar').hidden = false;
   document.getElementById('compassBtns').hidden = false;
   document.getElementById('arrivedBadge').hidden = true;
-  lastNavPos = null;
   spokenKey = null;
   if (window.speechSynthesis) window.speechSynthesis.cancel();
 }
 
-let lastNavPos = null;
+// ── 부드러운 내비게이션 ──
+// 예전에는 0.09초마다(GPS는 1초마다) 위치를 툭툭 옮기고, 방향도 그때마다 바로 앞 짧은 선분의 방향으로 바꿔서
+// 화면이 덜컥거리고 흔들렸다. 이제는
+//   - 화면 프레임마다(초당 약 60번) 그린다
+//   - 러너는 항상 경로 위에 두고, 새 위치(GPS)가 오면 그쪽으로 미끄러지듯 따라간다
+//   - 방향은 25m 앞 경로를 보고 정하고, 천천히 돌린다 (작은 꺾임에 흔들리지 않고, 회전은 미리 시작)
+//   - 확대·기울기는 시작할 때 한 번만 맞춘다
+const LOOK_BACK_M = 10, LOOK_AHEAD_M = 35;   // 방향은 뒤 10m ~ 앞 35m를 잇는 방향 — 인도의 작은 지그재그에 흔들리지 않고, 모퉁이 전에 미리 돌기 시작한다
+const FOLLOW_SEC = 0.8;    // GPS 위치를 따라잡는 시간
+const TURN_SEC = 1.0;      // 방향을 돌리는 시간
+const MAX_TURN_DEG_PER_SEC = 90;   // 급한 모퉁이에서도 1초에 90도보다 빨리 돌지 않는다 (한 번에 휙 돌지 않게)
+const UI_EVERY_MS = 250;   // 안내 문구·남은 거리는 이 간격으로만 고친다
+let nav = null;
 
-function updateProgressUI(lat, lng, distanceSoFarM, totalM, locatedSteps, paceMinPerKm){
-  // 지도 타일이 아직 안 떴어도(느린 폰 네트워크 등) 안내·남은 거리·도착·음성은 계속 돌아야 한다.
-  // 예전엔 여기서 바로 return해서, 지도가 늦으면 내비게이션 전체가 조용히 멈췄다.
-  if (runnerOverlay) runnerOverlay.setLngLat([lng, lat]);
-  if (map) moveNavCamera(lat, lng);
-
-  updateTurnBanner(locatedSteps, distanceSoFarM);
-  return updateEtaAndArrival(distanceSoFarM, totalM, paceMinPerKm);
+function stopNavLoop(){
+  if (nav && nav.frame) cancelAnimationFrame(nav.frame);
+  clearInterval(animTimer);
+  nav = null;
+}
+function pointAtDistance(path, cum, d){
+  const total = cum[cum.length - 1];
+  return stateAtFraction(path, cum, Math.max(0, Math.min(total, d)) / (total || 1));
+}
+function turnToward(from, to, k, maxStep){
+  const diff = ((to - from + 540) % 360) - 180;   // 가까운 쪽으로 돈다
+  const step = Math.max(-maxStep, Math.min(maxStep, diff * k));
+  return (from + step + 360) % 360;
+}
+function startNavLoop(course, pace){
+  stopNavLoop();
+  const path = course.path, cum = cumulativeDistances(path), total = cum[cum.length - 1];
+  nav = { path, cum, total, steps: turnAngles(locateStepsOnPath(course.steps, path, cum), path, cum), pace,
+          target: 0, shown: 0, heading: null, last: performance.now(), lastUi: 0, frame: null, done: false };
+  mapView.navStart();
+  updateTurnBanner(nav.steps, 0);
+  const tick = (now) => {
+    if (!nav) return;
+    const dt = Math.min(0.1, (now - nav.last) / 1000); nav.last = now;
+    if (nav.simulate) nav.target = Math.min(total, nav.target + nav.simulate * dt);
+    nav.shown += (nav.target - nav.shown) * (1 - Math.exp(-dt / FOLLOW_SEC));
+    if (nav.simulate) nav.shown = nav.target;                     // 시뮬레이션은 이미 매끄럽다
+    const here = pointAtDistance(path, cum, nav.shown);
+    const behind = pointAtDistance(path, cum, nav.shown - LOOK_BACK_M), ahead = pointAtDistance(path, cum, nav.shown + LOOK_AHEAD_M);
+    const want = haversine([behind.lat, behind.lng], [ahead.lat, ahead.lng]) > 2 ? bearing([behind.lat, behind.lng], [ahead.lat, ahead.lng]) : nav.heading ?? 0;
+    nav.heading = nav.heading == null ? want : turnToward(nav.heading, want, 1 - Math.exp(-dt / TURN_SEC), MAX_TURN_DEG_PER_SEC * dt);
+    mapView.frame(here.lat, here.lng, nav.heading);
+    if (now - nav.lastUi > UI_EVERY_MS){
+      nav.lastUi = now;
+      updateTurnBanner(nav.steps, nav.shown);
+      // 시뮬레이션은 끝까지 재생됐을 때, GPS는 경로를 따라 끝점 20m 안까지 왔을 때만 도착이다.
+      // 표시용 위치(shown)는 따라잡는 중이라 늦으므로, 도착은 받은 위치(target)로 판단한다.
+      const progress = nav.simulate ? nav.shown : nav.target;
+      if (!nav.done && updateEtaAndArrival(progress, total, nav.pace, nav.simulate ? 1 : ARRIVE_GPS_M)){ nav.done = true; nav.onArrive && nav.onArrive(); }
+    }
+    if (!(nav.done && nav.simulate)) nav.frame = requestAnimationFrame(tick);
+  };
+  nav.frame = requestAnimationFrame(tick);
+  return nav;
+}
+// GPS 위치를 경로 위 진행 거리로 바꾼다. 직전 진행 거리 근처(뒤로 50m ~ 앞으로 300m)에서만 찾는다.
+// 전체에서 가장 가까운 점을 고르면 순환 코스의 출발점(=도착점)에서 바로 끝으로 잡혀 "도착"이 떴고,
+// 코스가 스스로 가까이 지나는 곳에서는 나중 구간으로 튀었다. 첫 위치는 출발점 쪽(hint=0)에서 찾는다.
+function progressOnPath(latlng, path, cum, hint){
+  let best = null;
+  const scan = (lo, hi) => {
+    for (let i = 1; i < path.length; i++){
+      if (cum[i] < lo || cum[i - 1] > hi) continue;
+      const a = path[i - 1], b = path[i], k = Math.cos(a[0] * Math.PI / 180);
+      const ax = 0, ay = 0, bx = (b[1] - a[1]) * k, by = b[0] - a[0], px = (latlng[1] - a[1]) * k, py = latlng[0] - a[0];
+      const L = bx * bx + by * by, t = L ? Math.max(0, Math.min(1, (px * bx + py * by) / L)) : 0;
+      const q = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], d = haversine(latlng, q);
+      if (!best || d < best.offTrackM) best = { cumDistance: cum[i - 1] + (cum[i] - cum[i - 1]) * t, offTrackM: d };
+    }
+  };
+  scan((hint || 0) - 50, (hint || 0) + 300);
+  return best || { cumDistance: hint || 0, offTrackM: Infinity };
 }
 
-function moveNavCamera(lat, lng){
-  // 내비게이션 카메라: 진행 방향이 항상 화면 위쪽을 향하도록 지도를 돌린다(heading-up).
-  // 지도를 북쪽 고정으로 두면 "좌회전"이 화면에서 오른쪽으로 보이는 일이 생긴다.
-  const camera = { center: [lng, lat], pitch: NAV_PITCH, zoom: NAV_ZOOM, duration: 380 };
-  if (lastNavPos && haversine(lastNavPos, [lat, lng]) > 3){
-    camera.bearing = bearing(lastNavPos, [lat, lng]);
-  }
-  if (!lastNavPos || haversine(lastNavPos, [lat, lng]) > 1) lastNavPos = [lat, lng];
-  map.easeTo(camera);
-}
+const ARRIVE_GPS_M = 20;   // GPS는 오차가 있어 끝점 20m 안이면 도착 (진행 거리는 경로를 따라 온 것만 센다)
 
-function updateEtaAndArrival(distanceSoFarM, totalM, paceMinPerKm){
-
+function updateEtaAndArrival(distanceSoFarM, totalM, paceMinPerKm, arriveWithinM = 5){
   const remainKm = Math.max(0, (totalM - distanceSoFarM) / 1000);
   document.getElementById('etaTime').textContent = fmtKoreanTime(new Date(Date.now() + remainKm * paceMinPerKm * 60000));
   document.getElementById('etaSub').textContent = `${fmt(remainKm)}km · ${Math.max(0, Math.round(remainKm * paceMinPerKm))}분 남음`;
 
-  if (distanceSoFarM >= totalM - 5){
+  if (distanceSoFarM >= totalM - arriveWithinM){
     document.getElementById('turnPrimary').hidden = true;
     document.getElementById('turnSecondary').hidden = true;
     document.getElementById('arrivedBadge').hidden = false;
@@ -667,27 +836,16 @@ function updateEtaAndArrival(distanceSoFarM, totalM, paceMinPerKm){
   return false;
 }
 
-// 데스크톱에서 코스를 미리 보기 위한 가짜 재생 — 실제 위치가 아니라 압축된 타이머로 경로를 훑는다.
 function startNavigationSimulated(course){
   enterNavMode();
   simulatedNavigation = true;
-  const pathArr = course.path;
-  const cum = cumulativeDistances(pathArr);
-  const total = cum[cum.length-1];
-  const locatedSteps = locateStepsOnPath(course.steps, pathArr, cum);
-  const durationMs = Math.max(16000, locatedSteps.length * 1500);
-  const t0 = performance.now();
-
-  document.getElementById('status').textContent = '시뮬레이션 재생 중 (실제 위치 아님 — 페이스를 데모용으로 압축, 안내 문구는 Tmap 실제 응답)';
+  const located = locateStepsOnPath(course.steps, course.path, cumulativeDistances(course.path));
+  const total = cumulativeDistances(course.path).slice(-1)[0];
+  const durationMs = Math.max(16000, located.length * 1500);
+  document.getElementById('status').textContent = '시뮬레이션 재생 중 (실제 위치 아님 — 페이스를 데모용으로 압축, 안내 문구는 Tmap 실제 응답)' + tmapSummary(course);
   document.getElementById('status').classList.add('live');
-  updateTurnBanner(locatedSteps, 0);
-
-  animTimer = setInterval(() => {
-    const frac = Math.min(1, (performance.now() - t0) / durationMs);
-    const { lat, lng } = stateAtFraction(pathArr, cum, frac);
-    const arrived = updateProgressUI(lat, lng, frac * total, total, locatedSteps, PACE_MIN_PER_KM);
-    if (arrived) clearInterval(animTimer);
-  }, 90);
+  const run = startNavLoop(course, PACE_MIN_PER_KM);
+  run.simulate = total / (durationMs / 1000);   // m/초
 }
 
 // 진짜 내비게이션: 브라우저 Geolocation API로 실제 기기 위치를 계속 받아서, 그 위치가 경로 위
@@ -702,8 +860,8 @@ function startNavigationGPS(course){
   simulatedNavigation = false;
   const pathArr = course.path;
   const cum = cumulativeDistances(pathArr);
-  const total = cum[cum.length-1];
-  const locatedSteps = locateStepsOnPath(course.steps, pathArr, cum);
+  const run = startNavLoop(course, PACE_MIN_PER_KM);
+  run.onArrive = () => { if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; } };
 
   document.getElementById('status').textContent = '실제 GPS 위치를 기다리는 중… (위치 권한을 허용해주세요)';
   document.getElementById('status').classList.add('live');
@@ -711,15 +869,16 @@ function startNavigationGPS(course){
   let gotFirstFix = false;
   watchId = navigator.geolocation.watchPosition(
     (geo) => {
-      gotFirstFix = true;
       const { latitude: lat, longitude: lng, speed } = geo.coords;
-      const { cumDistance, offTrackM } = nearestProgressOnPath([lat, lng], pathArr, cum);
-      const pace = speed && speed > 0.2 ? (1000 / speed) / 60 : PACE_MIN_PER_KM; // 실측 속도가 있으면 그걸로 ETA 계산
-      const arrived = updateProgressUI(lat, lng, cumDistance, total, locatedSteps, pace);
+      const { cumDistance, offTrackM } = progressOnPath([lat, lng], pathArr, cum, run.target);
+      run.pace = speed && speed > 0.2 ? (1000 / speed) / 60 : PACE_MIN_PER_KM; // 실측 속도가 있으면 그걸로 ETA 계산
+      // 경로에서 멀리 벗어난 위치로는 진행 거리를 옮기지 않는다 (엉뚱한 구간으로 건너뛰지 않게)
+      if (offTrackM <= 40) run.target = Math.max(run.target, cumDistance);
+      if (!gotFirstFix) run.shown = cumDistance;   // 첫 위치는 바로 그 자리에서 시작
+      gotFirstFix = true;
       document.getElementById('status').textContent = offTrackM > 40
         ? `실제 위치 수신 중 · 경로에서 약 ${Math.round(offTrackM)}m 떨어져 있음`
         : '실제 위치로 안내 중';
-      if (arrived) navigator.geolocation.clearWatch(watchId);
     },
     (err) => {
       document.getElementById('status').textContent = `위치 정보를 가져오지 못했습니다(${err.message}) — 시뮬레이션으로 대신 진행합니다.`;
@@ -741,8 +900,44 @@ function startNavigationGPS(course){
   }, 12000);
 }
 
-document.getElementById('navBtn').addEventListener('click', () => startNavigationGPS(window._currentCourse));
-document.getElementById('simBtn').addEventListener('click', () => startNavigationSimulated(window._currentCourse));
+// 사용자가 고른 코스를 Tmap 보행자 경로로 잇는다. 어느 길로 돌지는 우리 모델이 정했고, Tmap은 그 길을
+// 인도·횡단보도로 이어 주고 회전 안내를 붙인다 — 안내는 Tmap이 이어 준 이 경로로 한다.
+async function followWithTmap(course){
+  if (!course || course._tmap || course._tmapFailed) return course;
+  if (course.tmap){
+    // 서버가 이미 실제로 달릴 Tmap 경로로 바꿔서 줬다 (거리도 그 경로로 맞춘 것)
+    course._tmap = course.tmap; course._plan = course.plan_path;
+    return course;
+  }
+  const status = document.getElementById('status');
+  status.textContent = '고른 코스를 Tmap 보행 경로로 잇는 중…';
+  try {
+    const res = await fetch('/courses/follow', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                 body: JSON.stringify({ path: course.path }) });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+    const body = await res.json();
+    course._plan = course.path;
+    course.path = body.path; course.steps = body.steps; course.distance_km = body.distance_km; course._tmap = body.follow;
+    showTmapRoute(course);
+  } catch (e){
+    course._tmapFailed = true;
+    status.textContent = 'Tmap으로 잇지 못해 우리 지도 경로로 안내합니다: ' + e.message;
+  }
+  return course;
+}
+function tmapSummary(course){
+  const f = course._tmap;
+  if (!f) return '';
+  return ` · Tmap 경로 · 우리 코스 ${Math.round(f.plan_covered * 100)}% 따라감 · ${f.distance_km}km · Tmap ${f.calls}번 호출`
+    + (f.ok ? '' : ' · 일부 구간이 우리 코스와 다름');
+}
+// 지도에 Tmap 경로(파란 선)를 그리고, 우리 모델이 짠 원래 코스는 주황 띠로 밑에 깐다
+function showTmapRoute(course){
+  mapView.setRoute(course.path);
+  mapView.setPlan(course._plan);
+}
+document.getElementById('navBtn').addEventListener('click', async () => startNavigationGPS(await followWithTmap(window._currentCourse)));
+document.getElementById('simBtn').addEventListener('click', async () => startNavigationSimulated(await followWithTmap(window._currentCourse)));
 document.getElementById('restartBtn').addEventListener('click', () => {
   if (window._currentCourse) startNavigationSimulated(window._currentCourse);
 });
@@ -754,7 +949,7 @@ document.getElementById('voiceBtn').addEventListener('click', (e) => {
   else speak('음성 안내를 켰습니다', true);
 });
 document.getElementById('exitBtn').addEventListener('click', () => {
-  clearInterval(animTimer);
+  stopNavLoop();
   if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
   if (window._currentCourse) showRouteSheet(window._currentCourse, window._currentScore);
   document.getElementById('status').textContent = '내비게이션을 종료했습니다.';
@@ -764,10 +959,6 @@ document.getElementById('exitBtn').addEventListener('click', () => {
 document.getElementById('dist').addEventListener('input', e => {
   document.getElementById('distVal').textContent = parseFloat(e.target.value).toFixed(1) + ' km';
 });
-document.querySelectorAll('#elevSeg button').forEach(b => b.addEventListener('click', () => {
-  document.querySelectorAll('#elevSeg button').forEach(x => x.classList.remove('on'));
-  b.classList.add('on');
-}));
 // 풍경 선택지는 서버가 내려준다 — 실제로 그 풍경을 지나는 코스가 있는 것만, 붙는 기준과 함께.
 // 화면에 고정해 두면 코스가 없는 풍경도 고를 수 있게 되어 결과 0개가 나온다.
 const DEFAULT_TAG_HINT = document.getElementById('tagHint').textContent;
@@ -818,6 +1009,8 @@ function chooseLocation(button, loc){
   document.querySelectorAll('#locBtns button').forEach(x => x.classList.remove('on'));
   button.classList.add('on');
   selectedLoc = loc;
+  document.getElementById('startInput').value = '';
+  document.getElementById('startNote').textContent = '위 버튼 중 하나를 고르거나, 원하는 출발지를 검색하세요.';
   loadScenery(selectedLoc);   // 그 자리 주변에 실제로 있는 풍경으로 선택지를 다시 받는다
 }
 document.querySelectorAll('#locBtns button').forEach(b => b.addEventListener('click', () => {
@@ -844,69 +1037,76 @@ document.querySelectorAll('#locBtns button').forEach(b => b.addEventListener('cl
   );
 }));
 
-// 목적지 검색: 입력을 멈추면 후보를 받아 목록으로 보여준다. 이름이 같은 장소가 여러 곳일 수 있어서
-// 서버가 하나를 찍지 않고 사용자가 고른다.
-let chosenPlace = null, placeTimer = null, placeQuery = 0;
-const destInput = document.getElementById('destInput');
-const placeList = document.getElementById('placeList');
-const destNote = document.getElementById('destNote');
-const DEFAULT_DEST_NOTE = destNote.textContent;
-function showPlaces(places){
-  placeList.innerHTML = '';
-  placeList.hidden = !places.length;
-  places.forEach(place => {
-    const li = document.createElement('li');
-    li.tabIndex = 0;
-    li.textContent = place.name;
-    const detail = document.createElement('small');
-    const far = place.distance_km == null ? '' : ` · 여기서 ${place.distance_km < 1 ? Math.round(place.distance_km * 1000) + 'm' : place.distance_km.toFixed(1) + 'km'}`;
-    detail.textContent = [place.category, place.address].filter(Boolean).join(' · ') + far;
-    li.appendChild(detail);
-    const pick = () => {
-      chosenPlace = place;
-      destInput.value = place.name;
-      placeList.hidden = true;
-      destNote.textContent = `목적지: ${place.name} (${place.address})`;
-    };
-    li.addEventListener('click', pick);
-    li.addEventListener('keydown', e => { if (e.key === 'Enter') pick(); });
-    placeList.appendChild(li);
+// 장소 검색 (출발지·목적지 공용): 입력을 멈추면 후보를 받아 목록으로 보여준다. 이름이 같은 장소가 여러 곳일
+// 수 있어서 서버가 하나를 찍지 않고 사용자가 고른다.
+function placeSearch(input, list, note, onPick){
+  const defaultNote = note.textContent;
+  let timer = null, query = 0;
+  function show(places){
+    list.innerHTML = '';
+    list.hidden = !places.length;
+    places.forEach(place => {
+      const li = document.createElement('li');
+      li.tabIndex = 0;
+      li.textContent = place.name;
+      const detail = document.createElement('small');
+      const far = place.distance_km == null ? '' : ` · 여기서 ${place.distance_km < 1 ? Math.round(place.distance_km * 1000) + 'm' : place.distance_km.toFixed(1) + 'km'}`;
+      detail.textContent = [place.category, place.address].filter(Boolean).join(' · ') + far;
+      li.appendChild(detail);
+      const pick = () => { input.value = place.name; list.hidden = true; onPick(place); };
+      li.addEventListener('click', pick);
+      li.addEventListener('keydown', e => { if (e.key === 'Enter') pick(); });
+      list.appendChild(li);
+    });
+  }
+  input.addEventListener('input', () => {
+    onPick(null);
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 2){ show([]); note.textContent = defaultNote; return; }
+    timer = setTimeout(async () => {
+      const mine = ++query;
+      try {
+        const res = await fetch(`/places?q=${encodeURIComponent(q)}&lat=${selectedLoc.lat}&lng=${selectedLoc.lng}`);
+        const { places } = await res.json();
+        if (mine !== query) return;   // 그사이 다시 입력했으면 이 결과는 버린다
+        show(places);
+        note.textContent = places.length ? '목록에서 골라 주세요.' : `'${q}'을(를) 찾지 못했습니다. 다른 이름으로 검색해 보세요.`;
+      } catch (e) { note.textContent = '장소를 검색하지 못했습니다.'; }
+    }, 350);
   });
 }
-destInput.addEventListener('input', () => {
-  chosenPlace = null;
-  clearTimeout(placeTimer);
-  const q = destInput.value.trim();
-  if (q.length < 2){ showPlaces([]); destNote.textContent = DEFAULT_DEST_NOTE; return; }
-  placeTimer = setTimeout(async () => {
-    const mine = ++placeQuery;
-    try {
-      const res = await fetch(`/places?q=${encodeURIComponent(q)}&lat=${selectedLoc.lat}&lng=${selectedLoc.lng}`);
-      const { places } = await res.json();
-      if (mine !== placeQuery) return;   // 그사이 다시 입력했으면 이 결과는 버린다
-      showPlaces(places);
-      destNote.textContent = places.length ? '목록에서 목적지를 골라 주세요.' : `'${q}'을(를) 찾지 못했습니다. 다른 이름으로 검색해 보세요.`;
-    } catch (e) { destNote.textContent = '장소를 검색하지 못했습니다.'; }
-  }, 350);
+
+let chosenPlace = null;
+const destNote = document.getElementById('destNote');
+placeSearch(document.getElementById('destInput'), document.getElementById('placeList'), destNote, place => {
+  chosenPlace = place;
+  if (place) destNote.textContent = `목적지: ${place.name} (${place.address})`;
+});
+const startNote = document.getElementById('startNote');
+placeSearch(document.getElementById('startInput'), document.getElementById('startList'), startNote, place => {
+  if (!place) return;
+  document.querySelectorAll('#locBtns button').forEach(x => x.classList.remove('on'));
+  selectedLoc = { lat: place.lat, lng: place.lng };
+  startNote.textContent = `출발지: ${place.name} (${place.address})`;
+  loadScenery(selectedLoc);   // 그 자리 주변에 실제로 있는 풍경으로 선택지를 다시 받는다
 });
 
 document.getElementById('goBtn').addEventListener('click', async () => {
   const goBtn = document.getElementById('goBtn');
   const status = document.getElementById('status');
   goBtn.disabled = true;
-  clearInterval(animTimer);
+  stopNavLoop();
   status.classList.remove('live');
   status.textContent = '서버에 요청 중… (현위치 근처에 없으면 실시간 생성이라 최대 15초 정도 걸릴 수 있습니다)';
 
   const tags = [...document.querySelectorAll('#tagChips .chip.on')].map(b => b.dataset.tag);
-  const elev = document.querySelector('#elevSeg button.on').dataset.v;
   const routeType = document.querySelector('#routeSeg button.on').dataset.v;
   const destination = document.getElementById('destInput').value.trim();
   // 목록에서 고른 장소면 그 좌표로 보낸다 (이름만 보내면 서버가 첫 후보로 정한다)
   const picked = chosenPlace && chosenPlace.name === destination ? chosenPlace : null;
   const payload = {
     preferred_distance_km: parseFloat(document.getElementById('dist').value),
-    elevation_preference: elev,
     environment_tags: tags,
     route_type: routeType,
     user_id: USER_ID,
@@ -915,9 +1115,12 @@ document.getElementById('goBtn').addEventListener('click', async () => {
     current_lat: selectedLoc.lat,
     current_lng: selectedLoc.lng,
     max_distance_km: 5,
-    use_live_environment: true,
     top_n: 1,
+    ...(window._choiceSet || {}),   // 앞 응답의 질문에 사용자가 고른 답 (밤에 풍경 길로 갈지, 거리를 늘릴지)
   };
+  window._appliedSet = window._choiceSet || {};   // 질문이 이어지면(밤에 강변 → 거리 늘리기) 앞 답도 같이 보낸다
+  window._choiceSet = null;
+  document.getElementById('choiceBox').hidden = true;
 
   const t0 = performance.now();
   try{
@@ -941,9 +1144,13 @@ document.getElementById('goBtn').addEventListener('click', async () => {
     course._source = body.source;
     window._currentCourse = course;
     window._currentScore = score;
+    window._attribution = body.attribution;
     const sourceLabel = { generated: '실시간 생성 완료', destination: '목적지 경로 생성 완료', db: 'DB 매칭 완료' };
     status.textContent = `${sourceLabel[body.source] || 'DB 매칭 완료'} · ${elapsed}초`;
+    if (body.notice) status.textContent += ` · ${body.notice}`;   // 고른 조건대로 못 만들어 대신 준 코스
+    showChoice(body.choice);
     drawCourse(course);
+    if (course.plan_path) mapView.setPlan(course.plan_path);   // 우리 모델이 짠 원래 코스는 주황 띠로 밑에
     showRouteSheet(course, score);
     markFavorite(!!body.results[0].favorite);
   } catch(e){
@@ -952,6 +1159,30 @@ document.getElementById('goBtn').addEventListener('click', async () => {
     goBtn.disabled = false;
   }
 });
+
+// 서버가 사용자에게 정하라고 넘긴 것(밤에 인적 드문 풍경 길로 갈지, 거리를 늘려 풍경까지 갈지)을 묻는다.
+// 고른 답(set)을 붙여 같은 조건으로 다시 요청한다. 답이 "지금 코스로"면 그대로 둔다.
+function showChoice(choice){
+  const box = document.getElementById('choiceBox');
+  box.hidden = !choice;
+  if (!choice) return;
+  box.innerHTML = '';
+  const q = document.createElement('p'); q.textContent = choice.question; box.appendChild(q);
+  const row = document.createElement('div');
+  choice.options.forEach(option => {
+    const b = document.createElement('button');
+    b.textContent = option.label;
+    if (Object.keys(option.set).length) b.className = 'yes';
+    b.addEventListener('click', () => {
+      box.hidden = true;
+      if (!Object.keys(option.set).length) return;
+      window._choiceSet = { ...(window._appliedSet || {}), ...option.set };
+      document.getElementById('goBtn').click();
+    });
+    row.appendChild(b);
+  });
+  box.appendChild(row);
+}
 
 // 코스를 받기 전에는 지도를 만들지 않는다 — drawCourse가 경로에 맞춰 새로 띄운다.
 
@@ -1028,7 +1259,7 @@ function showRateCard(){
   document.getElementById('rateNote').textContent = '평가할수록 다음 추천이 내 취향에 맞춰집니다';
 }
 
-// 항목별 질문은 서버가 내려준다. 별점만으로는 무엇이 좋았는지 알 수 없어서 거리·오르막·멈춤·풍경·안심을 따로 묻는다.
+// 항목별 질문은 서버가 내려준다. 별점만으로는 무엇이 좋았는지 알 수 없어서 거리·멈춤·풍경·안심을 따로 묻는다 (오르막은 고도 데이터가 정확해지면 다시 묻는다).
 fetch('/onboarding/feedback').then(r => r.json()).then(({ questions }) => {
   const box = document.getElementById('rateQuestions');
   questions.forEach(q => {

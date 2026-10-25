@@ -1,6 +1,7 @@
 """왕복·순환·편도는 서로 다른 코스다. 사용자가 고른 대로 나와야 한다.
 
-- 왕복(roundtrip): 갔던 길로 되돌아온다. 저장된 편도 코스를 두 배로 쓴다.
+- 왕복(roundtrip): 갔던 길로 되돌아온다. 현위치가 있으면 편도를 새로 만들어 되돌아오는 길을 붙이고,
+  없으면 저장된 편도 코스를 두 배로 쓴다.
 - 순환(loop): 한 바퀴 돌아 제자리로 온다. 경유지를 잡아 새로 만든다.
 - 편도(oneway): 목적지에서 끝난다.
 """
@@ -15,6 +16,13 @@ DB_COURSE = {
     "distance_km": 2.0, "elevation_gain_m": 10, "tags": [], "traffic_signal_count": 0,
     "safety_score": 0.7, "steps": [{"lat": 34.0, "lng": 127.0, "description": "출발", "turn_type": 200}],
 }
+GENERATED_OPEN = {
+    "id": "fresh-open", "name": "편도 코스", "region": "실시간 생성",
+    "path": [[34.0, 127.0], [34.012, 127.0], [34.024, 127.0]],
+    "distance_km": 2.5, "elevation_gain_m": None, "tags": [], "traffic_signal_count": 0,
+    "safety_score": 0.7, "route_type": "oneway", "source": "live_generated",
+    "steps": [{"lat": 34.0, "lng": 127.0, "description": "출발", "turn_type": 200}],
+}
 GENERATED_LOOP = {
     "id": "fresh-loop", "name": "순환 코스", "region": "실시간 생성",
     "path": [[34.0, 127.0], [34.005, 127.005], [34.0, 127.0]],
@@ -26,13 +34,13 @@ GENERATED_LOOP = {
 
 @pytest.fixture
 def stub(monkeypatch):
-    calls = {"loop": [], "oneway": []}
+    calls = {"loop": [], "oneway": [], "roundtrip": []}
     monkeypatch.setattr(main, "load_courses", lambda: [DB_COURSE])
     monkeypatch.setattr(main, "filter_nearby", lambda courses, lat, lng, radius: courses)
 
     def generate(lat, lng, km, tags, route_type="loop", night=False):
         calls[route_type].append(route_type)
-        return [GENERATED_LOOP]
+        return [dict(GENERATED_LOOP if route_type == "loop" else GENERATED_OPEN)]
 
     monkeypatch.setattr(main, "generate_loop_candidates", generate)
     monkeypatch.setattr(main, "attach_actual_return_path", lambda course: course)
@@ -58,15 +66,24 @@ def test_roundtrip_does_not_turn_into_a_loop(stub):
     """왕복을 골랐는데 순환 코스가 나오면 사용자가 고른 의미가 없다."""
     response = _ask("roundtrip")
     assert not stub["loop"], "왕복을 골랐는데 순환 생성을 호출했다"
+    assert stub["roundtrip"], "현위치가 있는데 저장된 코스를 썼다"
     course = response["results"][0]["course"]
     assert course["route_type"] == "roundtrip"
-    assert course["distance_km"] == DB_COURSE["distance_km"] * 2
+    assert course["distance_km"] == GENERATED_OPEN["distance_km"] * 2
 
 
-def test_oneway_keeps_the_stored_course_as_is(stub):
+def test_oneway_is_made_fresh_and_kept_one_way(stub):
     course = _ask("oneway")["results"][0]["course"]
+    assert stub["oneway"]
     assert course["route_type"] == "oneway"
-    assert course["distance_km"] == DB_COURSE["distance_km"]
+    assert course["distance_km"] == GENERATED_OPEN["distance_km"]
+
+
+def test_without_a_location_a_stored_course_is_doubled_for_a_roundtrip(stub):
+    request = main.RecommendRequest(route_type="roundtrip", preferred_distance_km=5.0)
+    course = main.post_recommend(request, BackgroundTasks())["results"][0]["course"]
+    assert course["id"] == "stored" and course["route_type"] == "roundtrip"
+    assert course["distance_km"] == DB_COURSE["distance_km"] * 2
 
 
 def test_loop_without_location_is_rejected_with_a_reason(stub):
@@ -84,3 +101,25 @@ def test_loop_without_location_is_rejected_with_a_reason(stub):
 def test_unknown_route_type_is_rejected():
     with pytest.raises(ValueError):
         main.RecommendRequest(route_type="circle")
+
+
+def test_course_without_a_measured_climb_can_be_doubled_and_trimmed():
+    """고도를 꺼 두면 새로 만든 코스는 고도가 비어 있다(None). 왕복으로 늘리거나 거리만큼 잘라도 멈추면 안 된다."""
+    from src.recommend.route_type import make_roundtrip
+    from src.recommend.trim import truncate_course
+
+    course = dict(GENERATED_OPEN)
+    assert make_roundtrip(course)["elevation_gain_m"] is None
+    assert truncate_course(dict(course, route_type="oneway"), 1.0)["elevation_gain_m"] is None
+
+
+def test_roundtrip_distance_is_the_real_way_out_plus_the_real_way_back():
+    """돌아오는 길은 일방통행·횡단보도 때문에 갈 때와 다를 수 있다. 거리를 '갈 때 × 2'로 치면 틀린다."""
+    from src.data_collection.enrich import haversine_m
+    from src.recommend.route_type import make_roundtrip
+
+    out = [[34.0, 127.0], [34.01, 127.0]]
+    back = [[34.01, 127.0], [34.01, 127.004], [34.0, 127.004], [34.0, 127.0]]
+    length = lambda p: sum(haversine_m(a, b) for a, b in zip(p, p[1:])) / 1000
+    course = make_roundtrip(dict(GENERATED_OPEN, path=out, return_path=back, distance_km=round(length(out), 2)))
+    assert course["distance_km"] == pytest.approx(length(out) + length(back), abs=0.01)

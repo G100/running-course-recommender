@@ -8,6 +8,7 @@
 import json
 import os
 
+from . import course_file
 from ..api_clients.tmap_pedestrian import extract_path, extract_steps, get_route
 from ..recommend.freshness import stamp_verified
 
@@ -17,9 +18,7 @@ CHANGE_THRESHOLD = 0.02  # 거리가 2% 넘게 달라지면 길 자체가 바뀐
 
 def refresh_course_in_db(course_id: str, db_path: str = DB_PATH) -> dict:
     """해당 코스의 경로·안내를 다시 받아 DB에 반영하고 갱신된 코스를 반환. 없으면 None."""
-    with open(db_path, encoding="utf-8") as f:
-        courses = json.load(f)
-
+    courses = course_file.read(db_path)
     course = next((c for c in courses if c["id"] == course_id), None)
     if not course or not course.get("path"):
         return None
@@ -41,6 +40,5 @@ def refresh_course_in_db(course_id: str, db_path: str = DB_PATH) -> dict:
     course["distance_km"] = new_km
     stamp_verified(course)
 
-    with open(db_path, "w", encoding="utf-8") as f:
-        json.dump(courses, f, ensure_ascii=False, indent=2)
-    return course
+    # Tmap을 기다리는 동안 다른 코스가 저장됐을 수 있다 — 이 코스만 바꿔 끼운다
+    return course if course_file.replace_one(db_path, course) else None

@@ -65,10 +65,16 @@ def make_roundtrip(course: dict, with_steps: bool = True) -> dict:
 
     result = dict(course)
     result["path"] = full_path
-    result["distance_km"] = round(course.get("distance_km", 0) * 2, 2)
+    if course.get("return_path"):
+        # 돌아오는 길은 일방통행·횡단보도 때문에 갈 때와 다를 수 있다 — 실제 두 길의 길이를 더한다
+        back_km = sum(haversine_m(a, b) for a, b in zip(course["return_path"], course["return_path"][1:])) / 1000
+        result["distance_km"] = round(course.get("distance_km", 0) + back_km, 2)
+    else:
+        result["distance_km"] = round(course.get("distance_km", 0) * 2, 2)
     # 왕복이면 오르막이 내리막으로도 한 번씩 더 나오므로 편도 상승고도의 약 2배로 근사한다
     # (지형이 완전히 대칭은 아니라 근사치임 — trim.py의 구간비례 방식과 같은 전제).
-    result["elevation_gain_m"] = round(course.get("elevation_gain_m", 0) * 2, 1)
+    climb = course.get("elevation_gain_m")   # 고도를 꺼 두면 새로 만든 코스는 비어 있다(None)
+    result["elevation_gain_m"] = None if climb is None else round(climb * 2, 1)
     result["route_type"] = "roundtrip"
     result["cum_outbound_m"] = cumulative_distances(path)[-1]
 

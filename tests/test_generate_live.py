@@ -267,3 +267,106 @@ def test_snap_rejects_nearest_road_outside_200_meter_radius(monkeypatch):
     monkeypatch.setattr(generate_live, "post_overpass_query", lambda query, timeout: Response())
 
     assert generate_live.snap_to_runnable_point(34.0, 127.001) is None
+
+class TestDistanceFit:
+    """요청 거리와 5% 안: 맞추는 건 나가는 코스 그대로의 길이로 한다 (Tmap 호출 없이)."""
+
+    def _square_with_spur(self, side_m, spur_m=300):
+        from src.recommend.generate_live import _offset
+
+        lat, lng = 34.0, 127.0
+        def walk(start, bearing, length):
+            n = max(1, int(length // 25))
+            return [_offset(start[0], start[1], bearing, length * k / n) for k in range(1, n + 1)]
+        start = (lat, lng)
+        up = walk(start, 0, spur_m)                      # 막다른 길로 들어갔다가
+        path = [start] + up + list(reversed(up[:-1])) + [start]   # 같은 길로 되나온다
+        for bearing in (90, 180, 270, 0):                # 그리고 한 바퀴
+            path += walk(path[-1], bearing, side_m)
+        return path
+
+    def test_fit_counts_the_length_left_after_dead_end_spurs_are_cut(self, monkeypatch):
+        """막다른 가지는 맞춘 뒤에 잘려 나가서 코스가 짧아졌다 (대전 3km → 2.12km)."""
+        from types import SimpleNamespace
+
+        from src.api_clients.tmap_pedestrian import extract_path
+        from src.recommend import generate_live as gl
+
+        def route(graph, start, end, waypoints, night=False):
+            path = self._square_with_spur(700 * waypoints[0][0])
+            total = sum(gl.haversine_m(a, b) for a, b in zip(path, path[1:]))
+            return {"features": [{"geometry": {"type": "Point", "coordinates": [127.0, 34.0]}, "properties": {"totalDistance": total}},
+                                 {"geometry": {"type": "LineString", "coordinates": [[b, a] for a, b in path]}}]}
+
+        monkeypatch.setattr(gl.road_graph, "route", route)
+        area = SimpleNamespace(graph=object())
+        chosen = gl._fit_length(area, 34.0, 127.0, 3.0, [(1.0, 0.0)], lambda mult: [(mult, 0.0)], False)
+        delivered = gl.prune_spurs(extract_path(route(None, None, None, chosen))[0])
+        km = gl.cumulative_distances(delivered)[-1] / 1000
+        assert abs(km - 3.0) / 3.0 <= 0.03, km
+
+
+def test_loops_far_from_the_asked_distance_are_dropped_when_a_close_one_exists():
+    from src.recommend.generate_live import keep_useful_loops
+
+    def loop(cid, km, lat):
+        return {"id": cid, "distance_km": km, "path": [[lat, 127.0], [lat + 0.01, 127.01], [lat, 127.0]]}
+
+    kept = keep_useful_loops([loop("short", 4.07, 34.0), loop("long", 6.0, 35.0), loop("close", 5.1, 36.0)], 5.0)
+    assert [c["id"] for c in kept] == ["close"]
+
+
+class TestOneWayDistanceFit:
+    """편도·왕복도 요청 거리와 5% 안이어야 한다 (해운대 3km 왕복이 2.24km로 나왔다)."""
+
+    def _stub(self, monkeypatch, detour):
+        from types import SimpleNamespace
+
+        from src.recommend import generate_live as gl
+
+        # 실제 길은 직선보다 detour배 길다 — 추정(ONE_WAY_DETOUR)과 다르면 처음 잡은 끝점은 빗나간다
+        def end(lat, lng, km, route_type, tags, area, offset, scale=1.0):
+            leg = km / 2 if route_type == "roundtrip" else km
+            return gl._offset(lat, lng, 90, leg * 1000 / gl.ONE_WAY_DETOUR * scale)
+
+        def route(graph, start, goal, waypoints=None, night=False):
+            km = gl.haversine_m(start, goal) * detour
+            return {"features": [{"geometry": {"type": "Point", "coordinates": [start[1], start[0]]}, "properties": {"totalDistance": km}},
+                                 {"geometry": {"type": "LineString", "coordinates": [[start[1], start[0]], [goal[1], goal[0]]]}}]}
+
+        monkeypatch.setattr(gl, "_one_way_end", end)
+        monkeypatch.setattr(gl.road_graph, "route", route)
+        return gl, SimpleNamespace(graph=object())
+
+    @pytest.mark.parametrize("route_type", ["oneway", "roundtrip"])
+    def test_end_point_is_moved_until_the_distance_fits(self, monkeypatch, route_type):
+        gl, area = self._stub(monkeypatch, detour=1.75)
+        goal = gl._fit_one_way_end(34.0, 127.0, 3.0, route_type, set(), area, 0, False)
+        leg_m = gl.haversine_m((34.0, 127.0), goal) * 1.75
+        total_km = leg_m * (2 if route_type == "roundtrip" else 1) / 1000
+        assert abs(total_km - 3.0) / 3.0 <= 0.03, total_km
+
+
+def test_one_way_end_on_an_island_crosses_the_bridge():
+    """여의도처럼 섬에서 출발하면 직선으로 2km를 그으면 전부 강을 건너 도착점을 못 찾았다.
+    도착점은 실제 길로 걸어서 그 거리만큼 가는 곳에서 고른다 — 다리도 길이다."""
+    from types import SimpleNamespace
+
+    from src.api_clients.tmap_pedestrian import extract_path
+    from src.recommend import generate_live as gl, road_graph as rg
+
+    def way(wid, pts, **tags):
+        return {"type": "way", "id": wid, "geometry": [{"lat": a, "lon": b} for a, b in pts], "tags": tags}
+
+    lat, lng = 34.0, 127.0
+    island = [(lat, lng + 0.001 * i) for i in range(4)]                         # 섬 안 길 약 270m
+    bridge = [island[-1], (lat + 0.006, lng + 0.003)]                            # 다리 약 670m
+    land = [bridge[-1]] + [(lat + 0.006, lng + 0.003 + 0.002 * i) for i in range(1, 12)]   # 건너편 길 약 2km
+    ways = [way(1, island, highway="footway"), way(2, bridge, highway="footway", bridge="yes"), way(3, land, highway="footway")]
+    graph = rg.RoadGraph(ways, {}, rg.PRIOR, facts={}, avoided=set())
+    area = SimpleNamespace(graph=graph, roads=ways, indexes={}, covers=lambda *a: True)
+
+    end = gl._fit_one_way_end(lat, lng, 2.5, "oneway", set(), area, 0, False)
+    assert end is not None, "섬에서 도착점을 못 찾았다"
+    km = extract_path(rg.route(graph, (lat, lng), end))[1] / 1000
+    assert abs(km - 2.5) / 2.5 <= 0.05, km

@@ -118,6 +118,9 @@ def _connect() -> sqlite3.Connection:
     fresh = not os.path.exists(FACTS_PATH)
     db = sqlite3.connect(FACTS_PATH)
     db.execute("CREATE TABLE IF NOT EXISTS facts (way TEXT PRIMARY KEY, sidewalk INTEGER NOT NULL)")
+    # Tmap이 이 길을 탔는지/피했는지 (tmap_follow가 쌓는다)
+    db.execute("CREATE TABLE IF NOT EXISTS tmap_ways (way TEXT PRIMARY KEY, ridden INTEGER NOT NULL DEFAULT 0, "
+               "avoided INTEGER NOT NULL DEFAULT 0)")
     if fresh and os.path.exists(SEED_PATH):
         with open(SEED_PATH, encoding="utf-8") as f:
             seed = json.load(f)

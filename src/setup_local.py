@@ -48,7 +48,7 @@ def main() -> int:
     from dotenv import dotenv_values
 
     # 키는 .env나 시스템 환경변수 중 어디에 있어도 된다 (서버도 둘 다 읽는다)
-    keys = {key: os.environ.get(key) for key in ("TMAP_APP_KEY", "KMA_API_KEY")}
+    keys = {key: os.environ.get(key) for key in ("TMAP_APP_KEY",)}
     if os.path.exists(".env"):
         keys = {key: value or dotenv_values(".env").get(key) for key, value in keys.items()}
     elif not all(keys.values()):

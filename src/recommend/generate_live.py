@@ -453,14 +453,16 @@ def retraced_ratio(path: list) -> float:
 ONE_WAY_DETOUR = 1.3  # 실제 길은 직선거리보다 이만큼 길다
 
 
-def _one_way_end(lat, lng, target_distance_km, route_type, tags, area, offset):
+def _one_way_end(lat, lng, target_distance_km, route_type, tags, area, offset, scale=1.0):
     """편도 경로의 도착점. 왕복이면 목표의 절반까지만 나간다.
 
     예전에는 여기서도 순환용 반경 공식을 써서 5km 편도 요청에 1km짜리가 만들어졌다.
     요청한 풍경이 있으면 그 풍경 위의 지점을, 없으면 길이 있는 방향을 고른다.
     """
     leg_km = target_distance_km / 2 if route_type == "roundtrip" else target_distance_km
-    straight_m = leg_km * 1000 / ONE_WAY_DETOUR
+    if area is not None and getattr(area, "graph", None) is not None:
+        return _network_end(area, lat, lng, leg_km * 1000 * scale, offset, _steerable(tags))
+    straight_m = leg_km * 1000 / ONE_WAY_DETOUR * scale
     if area is None or not area.covers(lat, lng, straight_m):
         # 받아 둔 범위 밖까지 나간다. 길에 붙이지 못하니 계산 좌표를 주고 Tmap이 가까운 길로 잡게 한다
         return _offset(lat, lng, offset, straight_m)
@@ -476,7 +478,72 @@ def _one_way_end(lat, lng, target_distance_km, route_type, tags, area, offset):
     return fallback
 
 
+END_BAND = 0.1   # 도착점 후보: 걸어서 목표 거리 ±10%에 있는 곳
+
+
+def _bearing_deg(a: tuple, b: tuple) -> float:
+    dy = b[0] - a[0]
+    dx = (b[1] - a[1]) * math.cos(math.radians(a[0]))
+    return math.degrees(math.atan2(dx, dy)) % 360
+
+
+def _network_end(area, lat: float, lng: float, leg_m: float, offset: float, names: list):
+    """실제 길로 걸어서 leg_m만큼 가는 곳 중에서 도착점을 고른다. 고른 풍경 위의 지점을 먼저, 그다음
+    offset 방향에 가까운 곳. 직선거리로 고르면 섬(여의도)에서는 어느 방향이든 강을 건너 도착점이 없었다
+    — 다리도 길이므로 길을 따라 재면 다리 건너편이 후보가 된다."""
+    graph = area.graph
+    start = graph.nearest_node(lat, lng)
+    if start is None:
+        return None
+    dist = graph.distances_from(start, leg_m * (1 + END_BAND))
+    band = [n for n, d in dist.items() if d >= leg_m * (1 - END_BAND)]
+    if not band:
+        return None   # 이 거리까지 이어진 길이 없다
+    if names:
+        feature, near_m = area.indexes[names[0]], MEASURE_RADIUS[names[0]]
+        scenic = [n for n in band if feature.near(n[0], n[1], near_m)]
+        band = scenic or band
+    return min(band, key=lambda n: _arc(_bearing_deg(start, n), offset % 360))
+
+
+def _fit_one_way_end(lat, lng, target_km, route_type, tags, area, offset, night):
+    """편도·왕복의 도착점을 실제 길 거리에 맞게 옮긴다 (Tmap 호출 없음, 받아 둔 도로망으로 짜 본다).
+
+    도착점은 직선거리 × 추정 배율로 잡는데, 실제 길이 얼마나 돌아가는지는 동네마다 달라서
+    해운대 3km 왕복이 2.24km로 나왔다. 짜 본 거리(왕복이면 갔다가 돌아오는 길까지)를 보고
+    도착점을 그 비율만큼 멀리·가까이 옮겨 다시 짠다. 가장 목표에 가까웠던 도착점을 돌려준다.
+    """
+    end = _one_way_end(lat, lng, target_km, route_type, tags, area, offset)
+    graph = area.graph if area is not None else None
+    if graph is None or end is None:
+        return end
+    start = (lat, lng)
+    best, best_gap, scale = end, float("inf"), 1.0
+    for _ in range(FIT_ROUNDS):
+        out = road_graph.route(graph, start, end, night=night)
+        if out is None:
+            break
+        km = extract_path(out)[1] / 1000
+        if route_type == "roundtrip":
+            back = road_graph.route(graph, end, start, night=night)
+            if back is None:
+                break
+            km += extract_path(back)[1] / 1000
+        gap = abs(km - target_km) / target_km
+        if gap < best_gap:
+            best, best_gap = end, gap
+        if gap <= FIT_TOLERANCE or km <= 0:
+            break
+        scale = min(max(scale * target_km / km, 0.3), 3.0)
+        moved = _one_way_end(lat, lng, target_km, route_type, tags, area, offset, scale)
+        if moved is None or moved == end:
+            break
+        end = moved
+    return best
+
+
 MAX_RETRACED = 0.03        # 순환 코스에서 왔던 길을 다시 지나는 비율 허용치
+DISTANCE_OK = 0.05         # 요청 거리와 이 비율 안이면 맞은 코스
 DISTANCE_TOLERANCE = 0.2   # 목표 거리와 이만큼 넘게 차이 나면 보정 생성을 한 번 더 한다
 
 
@@ -585,13 +652,101 @@ def find_nearby_point(lat: float, lng: float, radius_m: float, osm_filter: str) 
     return points[0] if points else None
 
 
+def _elevation_samples(path: list, n: int = 20) -> list:
+    return path[::max(1, len(path) // n)] if len(path) >= 2 else []
+
+
+def _gain(elevations: list) -> float:
+    known = [e for e in elevations if e is not None]   # 바다 위 등 표고가 없는 지점은 건너뛴다
+    return round(sum(max(0.0, b - a) for a, b in zip(known, known[1:])), 1)
+
+
 def sample_elevation_gain(path: list, n: int = 20) -> float:
-    if len(path) < 2:
-        return 0.0
-    step = max(1, len(path) // n)
-    samples = path[::step]
-    elevations = get_elevation_profile(samples)
-    return round(sum(max(0.0, elevations[i] - elevations[i - 1]) for i in range(1, len(elevations))), 1)
+    samples = _elevation_samples(path, n)
+    return _gain(get_elevation_profile(samples)) if samples else 0.0
+
+
+def _elevation_on() -> bool:
+    from .score import ELEVATION_ENABLED
+    return ELEVATION_ENABLED
+
+
+def measure_elevations(courses: list) -> None:
+    """고도를 아직 안 잰 코스들을 한 번에 재고, 고도에 따라 붙는 풍경(산길)을 다시 붙인다.
+    고도가 꺼져 있으면(score.ELEVATION_ENABLED) 재지 않는다 — 표고 API를 기다리는 시간도 없어진다."""
+    from .score import ELEVATION_ENABLED
+
+    if not ELEVATION_ENABLED:
+        return
+    pending = [c for c in courses if c.get("elevation_gain_m") is None and c.get("path")]
+    if not pending:
+        return
+    for course, gain in zip(pending, sample_elevation_gains([c["path"] for c in pending])):
+        course["elevation_gain_m"] = gain if gain is not None else 0.0
+        if gain is None:
+            course["elevation_unknown"] = True   # 표고 API를 못 써서 모른다 (0으로 두되 그렇다고 표시)
+        if course.get("scenery") is not None:
+            course["tags"] = scenery.scenery_tags(course["scenery"], course)
+
+
+def sample_elevation_gains(paths: list, n: int = 20) -> list:
+    """여러 코스의 오르막 합(m)을 한 번에 잰다 — 무료 표고 API는 초당 1건이라 코스마다 물으면 줄을 선다.
+    표고를 못 받으면(무료 한도·장애) None: 코스는 그대로 내보내고 고도만 모른다고 둔다."""
+    samples = [_elevation_samples(path, n) for path in paths]
+    try:
+        flat = get_elevation_profile([p for group in samples for p in group])
+    except requests.RequestException:
+        return [None] * len(paths)
+    gains, i = [], 0
+    for group in samples:
+        gains.append(_gain(flat[i:i + len(group)]) if group else 0.0)
+        i += len(group)
+    return gains
+
+
+FIT_TOLERANCE = 0.03   # 목표 거리와 이 비율 안이면 맞은 것으로 본다 (나가는 코스는 5% 안이어야 한다)
+FIT_ROUNDS = 5         # 한 번에 1초도 안 걸린다 (외부 호출 없음)
+
+
+def _delivered(path: list) -> tuple:
+    """실제로 나가는 코스의 길이(km)와 경로. 막다른 가지는 나중에 잘려 나가므로 잘라 낸 뒤의 길이로 잰다
+    (가지째로 맞췄더니 대전 3km가 잘린 뒤 2.12km, 망원 3km가 2.27km가 됐다)."""
+    if retraced_ratio(path) > MAX_RETRACED:
+        path = prune_spurs(path)
+    return cumulative_distances(path)[-1] / 1000, path
+
+
+def _fit_length(area, lat: float, lng: float, target_km: float, waypoints: list, rebuild, night: bool) -> list:
+    """경유지를 실제 거리에 맞게 다시 잡는다.
+
+    경유지는 직선거리로 길이를 추정해 잡기 때문에, 실제 길은 지형·좋은 길 우회에 따라 목표와 10~30%
+    어긋났다(대전 3km 요청에 2.0km·5.27km). 도로망이 있으면 경로를 직접 짜 보는 데 1초도 안 걸리므로,
+    짜 본 거리를 보고 경유지 범위를 키우거나 줄여서 다시 잡는다. 외부 호출은 없다(인도 확인은 마지막에 한 번).
+    rebuild(배율)은 범위를 그 배율로 바꾼 경유지를 준다. 가장 목표에 가까웠던 경유지를 돌려준다.
+    """
+    graph = area.graph if area is not None else None
+    if graph is None or not waypoints:
+        return waypoints
+    best, best_gap, mult = waypoints, float("inf"), 1.0
+    for _ in range(FIT_ROUNDS):
+        trial = road_graph.route(graph, (lat, lng), (lat, lng), waypoints, night=night)
+        if trial is None:
+            break
+        path, _ = extract_path(trial)
+        actual_km, delivered = _delivered(path)
+        gap = abs(actual_km - target_km) / target_km
+        # 스스로 교차하는 고리는 나중에 버려진다 — 거리가 맞아도 다른 게 없을 때만 쓴다
+        rank = gap + (1.0 if has_self_intersection(delivered) else 0.0)
+        if rank < best_gap:
+            best, best_gap = waypoints, rank
+        if gap <= FIT_TOLERANCE or actual_km <= 0:
+            break
+        mult = min(max(mult * target_km / actual_km, 0.4), 2.2)
+        rebuilt = rebuild(mult)
+        if not rebuilt:
+            break
+        waypoints = rebuilt
+    return best
 
 
 def _route(area, start: tuple, end: tuple, waypoints: list = None, night: bool = False) -> dict:
@@ -616,7 +771,8 @@ def _route(area, start: tuple, end: tuple, waypoints: list = None, night: bool =
 def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags: set,
                          route_type: str = "loop", angle_offset_deg: float | None = None,
                          snap_to_osm: bool = True, radius_scale: float = 1.0,
-                         ways: list | None = None, area=None, night: bool = False) -> dict:
+                         ways: list | None = None, area=None, night: bool = False,
+                         measure_elevation: bool = True) -> dict:
     """Generate one Tmap course candidate for a waypoint polygon orientation.
 
     ways(주변 보행로)를 주면 길이 있는 방향에서만 꼭짓점을 고른다. 없으면 예전처럼 원 위에 찍는다.
@@ -632,9 +788,15 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
         if route_type == "loop":
             waypoints = scenic_vertices_for_length(area, tags, lat, lng, target_distance_km * radius_scale, offset)
             if waypoints:
-                pass
+                rebuild = lambda mult, offset=offset: scenic_vertices_for_length(
+                    area, tags, lat, lng, target_distance_km * radius_scale * mult, offset)
+                waypoints = _fit_length(area, lat, lng, target_distance_km, waypoints, rebuild, night)
             elif ways:
                 waypoints = pick_land_vertices(lat, lng, target_distance_km, ways, offset, radius_scale, area, night)
+                if waypoints:
+                    rebuild = lambda mult, offset=offset: pick_land_vertices(
+                        lat, lng, target_distance_km, ways, offset, radius_scale * mult, area, night)
+                    waypoints = _fit_length(area, lat, lng, target_distance_km, waypoints, rebuild, night)
                 if not waypoints:
                     # 주변 길을 알고 있는데 길 있는 방향이 부족하다 = 이 반경·방향으론 순환이 안 나온다.
                     # 계산 좌표로 억지로 요청하면 바다 같은 곳이 경유지가 되어 Tmap이 400을 준다.
@@ -652,7 +814,7 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
                 logger.debug("이 경유지 조합은 Tmap이 거절했습니다: %s", error)
                 continue
         else:
-            waypoint = _one_way_end(lat, lng, target_distance_km, route_type, tags, area, offset)
+            waypoint = _fit_one_way_end(lat, lng, target_distance_km, route_type, tags, area, offset, night)
             if waypoint is None:
                 continue
             try:
@@ -725,7 +887,8 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
         "name": name,
         "region": "실시간 생성",
         "distance_km": round(distance_m / 1000, 2),
-        "elevation_gain_m": sample_elevation_gain(full_path),
+        # 후보 여럿을 만들 때는 호출 쪽이 남길 후보만 한 번에 잰다 (sample_elevation_gains)
+        "elevation_gain_m": sample_elevation_gain(full_path) if measure_elevation and _elevation_on() else None,
         "surface": "paved",
         "safety_score": 0.7,
         "path": full_path,
@@ -819,6 +982,7 @@ def generate_loop_candidates(lat: float, lng: float, target_distance_km: float, 
             ways=ways,
             area=area,
             night=night,
+            measure_elevation=False,
         )
 
     # 후보끼리는 서로를 기다릴 이유가 없다. 순서대로 만들면 사용자가 20초를 기다린다.
@@ -854,10 +1018,12 @@ def generate_loop_candidates(lat: float, lng: float, target_distance_km: float, 
                     ring_points(lat, lng, target_distance_km, angle, corrected)),
                 area=area,
                 night=night,
+                measure_elevation=False,
             ))
         except (ValueError, requests.HTTPError):
             pass
     useful = keep_useful_loops(candidates, target_distance_km)
+    measure_elevations(useful)   # 남길 후보만, 한 번의 요청으로
     if night:
         useful = safest_at_night(useful)
     if not useful:
@@ -905,6 +1071,9 @@ def keep_useful_loops(candidates: list, target_distance_km: float) -> list:
     """
     useful = [c for c in candidates if c.get("distance_km", 0) >= target_distance_km * MIN_LOOP_RATIO]
     useful.sort(key=lambda c: abs(c.get("distance_km", 0) - target_distance_km))
+    # 요청 거리와 5% 안인 후보가 있으면 그것만 남긴다 (풍경 점수가 높아도 거리가 크게 다르면 안 된다)
+    close = [c for c in useful if abs(c.get("distance_km", 0) - target_distance_km) <= target_distance_km * DISTANCE_OK]
+    useful = close or useful
     kept = []
     for course in useful:
         path = course.get("path") or []

@@ -29,7 +29,7 @@ def _stub_courses(monkeypatch):
 def test_recommend_returns_why_each_course_scored(monkeypatch):
     _stub_courses(monkeypatch)
     result = _recommend("runner-a").json()["results"][0]
-    assert set(result["score_breakdown"]) >= {"distance", "elevation", "safety", "signal_free"}
+    assert set(result["score_breakdown"]) == {"distance", "safety", "signal_free", "tag_match", "time_fit"}
 
 
 def test_feedback_updates_the_profile_and_explains_it(monkeypatch):
@@ -40,9 +40,8 @@ def test_feedback_updates_the_profile_and_explains_it(monkeypatch):
     body = resp.json()
     assert body["n_feedback"] == 1
     changes = {row["factor"]: row["change"] for row in body["explanation"]}
-    # 만족한 코스가 강했던 항목(신호등)은 오르고, 약했던 항목(고도·안전)은 내려간다
+    # 만족한 코스가 강했던 항목(신호등)은 오르고, 약했던 항목(안전)은 내려간다
     assert changes["signal_free"] > 0
-    assert changes["elevation"] < 0
     assert changes["safety"] < 0
 
 
@@ -95,11 +94,11 @@ def test_rating_out_of_range_is_rejected(monkeypatch):
 
 def test_profile_shows_learned_preferences(monkeypatch):
     _stub_courses(monkeypatch)
-    _recommend("runner-f", experience_level="beginner")
+    _recommend("runner-f")
     client.post("/feedback", json={"user_id": "runner-f", "course_id": "quiet", "rating": 5})
     profile = client.get("/profile/runner-f").json()
     assert profile["n_feedback"] == 1
-    assert profile["survey"]["experience_level"] == "beginner"
+    assert profile["survey"]["preferred_distance_km"] == 5
     assert "signal_free" in profile["weights"]
 
 

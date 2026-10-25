@@ -36,21 +36,21 @@ def test_nothing_stored_yet_is_a_404():
 
 def test_my_taste_shows_what_i_answered_and_what_changed():
     _rate("me", "sea", 5, aspects={"scenery": "good"}, comment="바다가 좋았어요")
-    _rate("me", "city", 2, aspects={"stops": "many", "elevation": "hard"})
+    _rate("me", "city", 2, aspects={"stops": "many", "distance": "long"})
     taste = client.get("/users/me/taste").json()
 
     assert taste["stats"]["feedback_count"] == 2
     assert taste["stats"]["average_rating"] == 3.5
     assert taste["stats"]["liked_scenery"][0] == {"label": "바다", "count": 1}
     assert any("신호등" in line for line in taste["summary"])
-    assert taste["tuning"]["elevation_scale"] < 1
+    assert taste["tuning"]["distance_scale"] < 1
 
     stops = next(q for q in taste["answers"] if q["key"] == "stops")
     assert stops["question"].endswith("?")
     assert {a["label"]: a["count"] for a in stops["answers"]}["자주 멈췄어요"] == 1
 
     newest, oldest = taste["history"]
-    assert newest["course_name"] == "시내길" and newest["answers"] == ["자주 멈췄어요", "힘들었어요"]
+    assert newest["course_name"] == "시내길" and newest["answers"] == ["자주 멈췄어요", "길었어요"]
     assert oldest["course_name"] == "해안길" and oldest["comment"] == "바다가 좋았어요"
     assert oldest["scenery_labels"] == ["바다", "공원"]
 

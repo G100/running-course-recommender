@@ -73,8 +73,9 @@ def _truncate_roundtrip(course: dict, target_km: float) -> dict:
     trimmed["path"] = new_path
     trimmed["distance_km"] = round(total_m / 1000, 2)
     trimmed["cum_outbound_m"] = out_cut_m
-    trimmed["elevation_gain_m"] = round(
-        course.get("elevation_gain_m", 0) * (total_m / 1000) / original_km, 1) if original_km else 0
+    climb = course.get("elevation_gain_m")   # 고도를 꺼 두면 새로 만든 코스는 비어 있다(None)
+    trimmed["elevation_gain_m"] = None if climb is None else (
+        round(climb * (total_m / 1000) / original_km, 1) if original_km else 0)
     trimmed["trimmed"] = True
     trimmed["original_distance_km"] = original_km
 
@@ -112,13 +113,13 @@ def truncate_course(course: dict, target_km: float) -> dict:
         trimmed_path.append(path[i])
 
     original_km = course.get("distance_km")
-    original_elev = course.get("elevation_gain_m", 0)
+    original_elev = course.get("elevation_gain_m")
     fraction = (cut_m / 1000) / original_km if original_km else 1.0
 
     trimmed = dict(course)
     trimmed["path"] = trimmed_path
     trimmed["distance_km"] = round(cut_m / 1000, 2)
-    trimmed["elevation_gain_m"] = round(original_elev * fraction, 1)  # 구간비례 근사치
+    trimmed["elevation_gain_m"] = None if original_elev is None else round(original_elev * fraction, 1)  # 구간비례 근사치
     trimmed["trimmed"] = True
     trimmed["original_distance_km"] = original_km
 
