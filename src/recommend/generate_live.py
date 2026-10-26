@@ -786,6 +786,7 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
     offsets = (angle_offset_deg,) if angle_offset_deg is not None else RETRY_ANGLE_OFFSETS_DEG
     if ways is None and area is not None:
         ways = area.roads
+    requested_type = route_type   # 아래에서 편도 경로로 만들려고 바꾼다. 이름은 요청한 모양(왕복)으로 짓는다
 
     not_sidewalk_only = False
     for offset in offsets:
@@ -882,8 +883,7 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
         route_type = "oneway"  # 만든 건 편도 경로다. 왕복이면 호출 쪽에서 실제 복귀 경로를 붙인다
     offset_suffix = (f"-a{offset:g}-r{radius_scale:g}" if route_type == "loop"
                      else f"-a{offset:g}" if angle_offset_deg else "")
-    name_suffix = f", {offset:g}°, 반경 {radius_scale:.0%}" if route_type == "loop" else ""
-    name = f"현위치 기반 {'순환' if route_type == 'loop' else '편도'} 코스 (기본{name_suffix})"
+    name = course_name(lat, lng, full_path, requested_type, [])
 
     course = {
         # 요청한 풍경이 다르면 다른 코스다 — 같은 id를 쓰면 저장할 때 서로 덮어쓴다
@@ -936,9 +936,30 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
         course["scenery_pending"] = True
     else:
         course["scenery"], course["tags"] = measured
-        if course["tags"]:
-            course["name"] = name.replace("(기본", f"({'·'.join(course['tags'][:2])}")
+        course["name"] = course_name(lat, lng, full_path, requested_type, course["tags"])
     return course
+
+
+DIRECTIONS = ("북", "북동", "동", "남동", "남", "남서", "서", "북서")
+SHAPE_WORDS = {"loop": "순환", "roundtrip": "왕복", "oneway": "편도"}
+
+
+def course_name(lat: float, lng: float, path: list, route_type: str, tags) -> str:
+    """러너가 알아볼 이름: 출발점에서 어느 쪽인지 + 코스 모양 + 대표 풍경 (예: "서쪽 순환 코스 · 바다").
+
+    순환은 고리의 가운데, 편도·왕복은 가장 멀리 가는 곳이 출발점에서 어느 쪽인지로 정한다.
+    풍경은 측정 태그(바다뷰·해변)가 아니라 러너가 고른 선택지 이름(바다)으로 보여준다."""
+    from .scenery_choices import labels_for
+
+    if route_type == "loop":
+        toward = (sum(p[0] for p in path) / len(path), sum(p[1] for p in path) / len(path))
+    else:
+        toward = max(path, key=lambda p: haversine_m((lat, lng), p))
+    bearing = math.degrees(math.atan2((toward[1] - lng) * math.cos(math.radians(lat)), toward[0] - lat)) % 360
+    side = DIRECTIONS[int((bearing + 22.5) // 45) % 8]
+    name = f"{side}쪽 {SHAPE_WORDS.get(route_type, '순환')} 코스"
+    labels = labels_for(tags)[:2]
+    return f"{name} · {'·'.join(labels)}" if labels else name
 
 
 SIGNAL_ON_PATH_M = 25

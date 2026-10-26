@@ -222,6 +222,34 @@ class TestSpikes:
         assert not [s for s in _prune_with_spans(path)[1] if s[1] - s[0] <= tmap_follow.SPIKE_MAX_M], "삐죽 구간이 남았다"
         assert side[-1] not in used and len(calls) == 2
 
+    def test_waypoint_that_holds_the_course_shape_is_kept(self, monkeypatch):
+        """삐죽 구간 끝의 경유지가 코스 모양을 붙잡고 있었다면 빼면 안 된다.
+
+        해운대 5km: 경유지 8개로 5.12km(5% 안)였는데, 삐죽 구간 끝의 경유지 둘을 빼고 다시 묻자 Tmap이
+        코스 서쪽 절반을 질러가 3.32km가 됐고 그대로 쓰였다. 우리 코스: A → 북쪽으로 돌아 → B.
+        북쪽 길 모퉁이의 짧은 막다른 길 끝에 경유지가 있다. 빼면 Tmap은 A→B 지름길로 간다."""
+        from src.api_clients.tmap_pedestrian import extract_path
+
+        a, b = (LAT, LNG), (LAT, LNG + 8 * D)
+        p1, p2 = (LAT + 3 * D, LNG + 2 * D), (LAT + 3 * D, LNG + 6 * D)
+        tip = (LAT + 3.55 * D, LNG + 2 * D)                               # 모퉁이에서 북쪽으로 61m 막다른 길
+        ways = [_way(1, [a, (LAT, LNG + 4 * D), b], highway="footway"),     # 지름길
+                _way(2, [a, p1, p2, b], highway="footway"),                  # 우리 코스
+                _way(3, [p1, tip], highway="footway")]
+        graph = rg.RoadGraph(ways, build_indexes({"all": ways}), rg.PRIOR, facts={}, avoided=set())
+        plan = [a, p1, p2, b]
+
+        def tmap(start, end, start_name="", end_name="", waypoints=None):
+            stops = [(lat, lng) for lng, lat in waypoints or []]
+            return rg.route(graph, (start[1], start[0]), (end[1], end[0]), stops)
+
+        monkeypatch.setattr(tmap_follow, "get_route", tmap)
+        first = tmap_follow.stitch(a, b, [tip])
+        route, used, _ = tmap_follow.remove_spikes(graph, a, b, [tip], *first, plan_path=plan, target_km=None)
+        path, _ = extract_path(route)
+        assert tmap_follow._share_near(plan, path) >= tmap_follow.FOLLOW_MIN, "Tmap이 우리 코스를 질러가는 경로가 쓰였다"
+        assert tip in used
+
 
 def test_joined_directions_have_no_waypoint_or_midway_arrival_messages(monkeypatch):
     """경로를 여러 번 나눠 물어 이으면 Tmap의 '경유지 후 125m 이동', 중간 '도착' 안내가 그대로 섞였다.

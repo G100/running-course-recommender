@@ -204,17 +204,29 @@ def _spike_m(path: list) -> float:
     return sum(b - a for a, b in _prune_with_spans(path)[1] if b - a <= SPIKE_MAX_M)
 
 
-def remove_spikes(graph, start: tuple, end: tuple, points: list, route: dict, calls: int) -> tuple:
+SHAPE_SLACK = 0.05   # 삐죽 구간을 없애고 다시 물은 경로가 우리 코스를 이만큼까지는 덜 따라가도 된다
+
+
+def remove_spikes(graph, start: tuple, end: tuple, points: list, route: dict, calls: int,
+                  plan_path: list = None, target_km: float = None) -> tuple:
     """Tmap 경로의 '삐죽' 구간(경유지가 옆길·맞은편에 찍혀 거기까지 들어갔다 되나오는 곳)을 없앤다.
-    그 끝에 있는 경유지를 빼고 다시 묻는다. 다시 물은 게 더 나으면 그것을 쓴다. (경로, 경유지, 호출 수)"""
-    path = extract_path(route)[0]
+    그 끝에 있는 경유지를 빼고 다시 묻는다. 다시 물은 게 더 나으면 그것을 쓴다. (경로, 경유지, 호출 수)
+
+    그 경유지가 코스 모양을 붙잡고 있었다면 빼면 안 된다. 해운대 5km: 경유지 8개로 5.12km(5% 안)였는데
+    삐죽 끝 경유지 둘을 빼자 Tmap이 코스 서쪽 절반을 질러가 3.32km가 됐고 그대로 쓰였다. 그래서 다시 물은
+    경로가 우리 코스(plan_path)를 덜 따라가거나, 요청 거리(target_km) 5% 안이던 것이 밖으로 나가면 버린다."""
+    path, metres = extract_path(route)
     tips = _spike_tips(path)
     bad = {p for p in points if any(haversine_m(p, tip) <= SPIKE_TIP_M for tip in tips)}
     if not bad:
         return route, points, calls
     kept = [p for p in points if p not in bad]
     again, more = stitch(start, end, kept)
-    if _spike_m(extract_path(again)[0]) < _spike_m(path):
+    new_path, new_metres = extract_path(again)
+    keeps_shape = plan_path is None or _share_near(plan_path, new_path) >= _share_near(plan_path, path) - SHAPE_SLACK
+    off = lambda m: abs(m / 1000 - target_km) / target_km > DISTANCE_OK
+    keeps_distance = not target_km or off(metres) or not off(new_metres)
+    if _spike_m(new_path) < _spike_m(path) and keeps_shape and keeps_distance:
         return again, kept, calls + more
     return route, points, calls + more
 
@@ -375,7 +387,7 @@ def follow(graph, plan_path: list, start: tuple = None, end: tuple = None, targe
             if _better(second_result, result, target):
                 route, result, points = second, second_result, new_points
                 used_plan = new_path if second_result["replanned"] else plan_path
-    cleaned, points, calls = remove_spikes(graph, start, end, points, route, calls)
+    cleaned, points, calls = remove_spikes(graph, start, end, points, route, calls, plan_path=used_plan, target_km=target)
     if cleaned is not route:
         route = cleaned
         result = dict(check(route, used_plan, graph), replanned=result["replanned"])
