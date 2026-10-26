@@ -316,6 +316,18 @@ def test_loops_far_from_the_asked_distance_are_dropped_when_a_close_one_exists()
     assert [c["id"] for c in kept] == ["close"]
 
 
+def test_loops_within_ten_percent_stay_as_choices():
+    """러너가 고를 수 있게 10% 안의 후보는 남긴다. 고른 코스는 Tmap으로 이을 때 같은 모양으로 5% 안에 맞춘다
+    (해운대 바다 5km 순환: 4.68·5.43·4.83km 중 4.83km 하나만 남아 고를 게 없었다)."""
+    from src.recommend.generate_live import keep_useful_loops
+
+    def loop(cid, km, lat):
+        return {"id": cid, "distance_km": km, "path": [[lat, 127.0], [lat + 0.01, 127.01], [lat, 127.0]]}
+
+    kept = keep_useful_loops([loop("a", 4.68, 34.0), loop("b", 5.43, 35.0), loop("c", 4.83, 36.0)], 5.0)
+    assert [c["id"] for c in kept] == ["c", "a", "b"], "목표에 가까운 순서로"
+
+
 class TestOneWayDistanceFit:
     """편도·왕복도 요청 거리와 5% 안이어야 한다 (해운대 3km 왕복이 2.24km로 나왔다)."""
 

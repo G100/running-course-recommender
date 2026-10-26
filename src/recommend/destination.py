@@ -14,6 +14,7 @@ from ..data_collection.enrich import haversine_m
 from ..api_clients.tmap_poi import search_places
 from ..data_collection.build_courses_from_landmarks import sample_elevation_gain
 from .route_type import attach_actual_return_path, make_roundtrip
+from .flow import junctions_per_km
 from .safety import safety_index, score_components
 
 LOCAL_ROUTE_MAX_M = 8000   # 이보다 먼 목적지는 도로망을 그만큼 넓게 읽어야 해서 Tmap에 맡긴다
@@ -206,6 +207,8 @@ def course_to_destination(lat: float, lng: float, place: str = None,
         points = area.safety_points
         course["safety_breakdown"] = score_components(path, points["cctv"], points["convenience"], points["police"])
         course["safety_score"] = safety_index(path, points["cctv"], points["convenience"], points["police"])
+        if getattr(area, "graph", None) is not None:
+            course["junctions_per_km"] = junctions_per_km(path, area.graph)
     if found is not None:
         # 어디로 정했는지, 그리고 그곳이 아닐 때 고를 수 있는 다른 후보
         course["destination"] = found

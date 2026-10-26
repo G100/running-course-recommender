@@ -67,16 +67,16 @@ def test_every_rating_is_kept_even_for_the_same_course():
 def test_weight_history_shows_how_the_taste_moved():
     for _ in range(3):
         _rate("me", "city", 1, aspects={"stops": "many"})
-    weights = [step["weights"]["signal_free"] for step in client.get("/users/me/taste").json()["weight_history"]]
+    weights = [step["weights"]["flow"] for step in client.get("/users/me/taste").json()["weight_history"]]
     assert len(weights) == 3 and weights == sorted(weights) and weights[0] < weights[-1]
 
 
 def test_people_only_see_their_own_data():
     _rate("me", "sea", 5, aspects={"scenery": "good"})
-    _rate("you", "city", 1, aspects={"safety": "unsafe"})
+    _rate("you", "city", 1, aspects={"cars": "often"})
     mine = client.get("/users/me/taste").json()
     assert [item["course_id"] for item in mine["history"]] == ["sea"]
-    assert not any("불안" in line for line in mine["summary"])
+    assert not any("차가 자주" in line for line in mine["summary"])
 
 
 def test_deleting_my_data_removes_everything_about_me():

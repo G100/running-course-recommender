@@ -27,7 +27,7 @@ from ..data_collection.scenery import THRESHOLDS as SCENERY_THRESHOLDS, tag_desc
 from ..api_clients.tmap_poi import search_places
 from ..recommend.destination import course_to_destination
 from ..recommend.freshness import stale_courses, stamp_verified
-from ..recommend.generate_live import generate_loop_candidates
+from ..recommend.generate_live import area_reach_m, generate_loop_candidates, generate_loop_course
 from ..recommend.location import filter_nearby
 from ..recommend.profile import resolve_target_distance_km
 from ..data_collection.enrich import haversine_m
@@ -188,6 +188,8 @@ class RecommendResponse(BaseModel):
     notice: Optional[str] = None  # 고른 조건대로 못 만들어 대신 준 코스일 때, 그 이유 (앱이 그대로 띄운다)
     # 사용자가 정할 일: {question, options: [{label, set}]}. 고른 option의 set을 요청에 더해 다시 보낸다
     choice: Optional[dict] = None
+    # 1등 말고 다른 후보를 고르면 이 거리로 실제 경로를 맞춘다 (POST /courses/deliver의 target_km)
+    deliver_km: Optional[float] = None
 
 
 class Credentials(BaseModel):
@@ -517,11 +519,59 @@ def _deliver_on_tmap(plan: dict, target_km: float, route_type: str, regenerate) 
     path, _ = extract_path(route)
     delivered = dict(plan, path=path, steps=assign_positions(extract_steps(route), path),
                      distance_km=route["follow"]["distance_km"], plan_path=plan["path"], tmap=route["follow"])
+    # 점수도 실제로 달리는 길로 다시 잰다: 어떤 길(차 없는 길 비율)과 갈림길 수
+    if route["follow"].get("road_mix"):
+        delivered["road_mix"] = route["follow"]["road_mix"]
+    if route["follow"].get("junctions_per_km") is not None:
+        delivered["junctions_per_km"] = route["follow"]["junctions_per_km"]
     delivered.pop("return_path", None)      # 왕복이면 Tmap 경로가 이미 갔다 오는 길 전체다
     delivered.pop("return_steps", None)
     if route_type == "oneway" and delivered["distance_km"] > target_km * (1 + DISTANCE_OK):
         delivered = truncate_course(delivered, target_km)
     return delivered
+
+
+class DeliverRequest(BaseModel):
+    course: dict                                     # 추천 응답의 course 그대로 (shape가 있으면 같은 모양으로 다시 짤 수 있다)
+    target_km: float = Field(gt=0)                   # 요청 거리
+    route_type: Literal["roundtrip", "loop", "oneway"] = "loop"
+
+
+def _regenerate_like(course: dict):
+    """고른 코스와 같은 자리·방향·모양·풍경으로, 거리만 바꿔 다시 짜는 함수. 다시 짤 방법이 없으면 None."""
+    shape = course.get("shape")
+    if not shape:
+        return None
+    route_type = shape["route_type"]
+
+    def remake(km: float):
+        area = area_cache.load_area(shape["lat"], shape["lng"], radius_m=area_reach_m(km, route_type))
+        try:
+            made = generate_loop_course(shape["lat"], shape["lng"], km, set(shape["tags"]), route_type=route_type,
+                                        angle_offset_deg=shape["angle"], radius_scale=shape["radius_scale"],
+                                        area=area, night=shape["night"], measure_elevation=False)
+        except (ValueError, requests.RequestException):
+            return None
+        if route_type != "loop":
+            made = apply_route_type(attach_actual_return_path(made) if route_type == "roundtrip" else made, route_type)
+        return dict(made, id=course["id"], shape=shape)   # 고른 코스로 남아야 평가·즐겨찾기가 맞는다
+    return remake
+
+
+@app.post("/courses/deliver")
+def deliver_course(req: DeliverRequest):
+    """러너가 고른 후보를 실제로 달릴 Tmap 경로로 맞춘다 (추천 응답의 1등은 이미 맞춰져 있다).
+
+    후보를 전부 미리 이으면 Tmap 호출이 후보 수만큼 늘어난다. 그래서 고른 것만 여기서 잇는다.
+    거리가 5% 넘게 다르면 같은 모양으로 크기만 고쳐 다시 짠다 — 다른 코스로 바뀌지 않는다.
+    """
+    course = req.course
+    if not course.get("path"):
+        raise HTTPException(status_code=400, detail="코스에 경로(path)가 없습니다.")
+    if course.get("tmap"):
+        return {"course": course}
+    regenerate = _regenerate_like(course) or (lambda km: None)
+    return {"course": _deliver_on_tmap(course, req.target_km, req.route_type, regenerate)}
 
 
 @app.post("/courses/follow")
@@ -830,8 +880,16 @@ def _recommend(req: RecommendRequest, background_tasks: BackgroundTasks, user: d
         raise HTTPException(status_code=404, detail="이 주변에서는 코스를 만들지 못했습니다. 다른 거리나 코스 형태로 시도해 보세요.")
     results = [{"course": trim_if_needed(course), "score": round(score, 4)} for course, score in ranked]
 
+    same_shape = _regenerate_like(results[0]["course"])
+
     def resize(km: float):
-        """같은 조건으로 크기만 바꿔 다시 짠다 (Tmap으로 이은 거리가 요청과 달랐을 때)."""
+        """크기만 바꿔 다시 짠다 (Tmap으로 이은 거리가 요청과 달랐을 때).
+
+        1등 코스와 같은 방향·모양으로 짠다. 새로 후보를 만들어 1등을 고르면 매번 다른 코스가 되고,
+        코스마다 Tmap이 늘리는 비율이 달라 거리가 수렴하지 않았다(해운대 바다 5km: 3.26 → 5.42 → 5.98km).
+        모양을 모르는 코스만 예전처럼 새로 만든다."""
+        if same_shape is not None:
+            return same_shape(km)
         try:
             made = generate(km, set() if plain else tags)
         except ValueError:
@@ -851,6 +909,7 @@ def _recommend(req: RecommendRequest, background_tasks: BackgroundTasks, user: d
         "source": "generated",
         "notice": notice,
         "choice": choice,
+        "deliver_km": deliver_km,   # 다른 후보를 고르면 이 거리로 맞춘다 (POST /courses/deliver)
     }
 
 

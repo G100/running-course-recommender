@@ -28,6 +28,7 @@ from ..data_collection.scenery import THRESHOLDS as SCENERY_THRESHOLDS
 from ..data_collection.enrich import haversine_m
 from ..data_collection.osm_overpass import OverpassUnavailable, post_overpass_query
 from . import road_graph, sidewalk
+from .flow import junctions_per_km
 from .safety import safety_index, score_components
 from .step_position import assign_positions, cumulative_distances
 
@@ -38,6 +39,8 @@ TAG_TO_OSM_FILTER = {
 SNAP_RADIUS_M = 200
 VERTEX_COUNT = 3
 RETRY_ANGLE_OFFSETS_DEG = (0.0, 20.0, -20.0)
+# 편도·왕복 후보는 서로 다른 쪽으로 간다 — 러너가 고를 수 있게 (0°가 예전의 단일 후보)
+ONE_WAY_OFFSETS_DEG = (0.0, 120.0, 240.0)
 # 순환 길이 ≈ 반경 × LOOP_LENGTH_PER_RADIUS. 경로는 원이 아니라 '출발점 → 꼭짓점 3개 → 출발점'이고
 # 여기에 실제 도로의 우회가 더해진다. 막다른 길 왕복을 걷어낸 뒤의 실측값으로 맞췄다(광주 5.7).
 # 예전 공식(원 둘레 = 목표)은 코스를 목표의 70% 안팎으로 만들었는데, 막다른 길 왕복이 거리를
@@ -544,6 +547,7 @@ def _fit_one_way_end(lat, lng, target_km, route_type, tags, area, offset, night)
 
 MAX_RETRACED = 0.03        # 순환 코스에서 왔던 길을 다시 지나는 비율 허용치
 DISTANCE_OK = 0.05         # 요청 거리와 이 비율 안이면 맞은 코스
+CHOICE_OK = 0.10           # 이 비율 안이면 고를 수 있는 후보로 남긴다 (고르면 Tmap으로 이을 때 5% 안으로 맞춘다)
 DISTANCE_TOLERANCE = 0.2   # 목표 거리와 이만큼 넘게 차이 나면 보정 생성을 한 번 더 한다
 
 
@@ -876,7 +880,8 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
             return_route = None
     if route_type != "loop":
         route_type = "oneway"  # 만든 건 편도 경로다. 왕복이면 호출 쪽에서 실제 복귀 경로를 붙인다
-    offset_suffix = f"-a{offset:g}-r{radius_scale:g}" if route_type == "loop" else ""
+    offset_suffix = (f"-a{offset:g}-r{radius_scale:g}" if route_type == "loop"
+                     else f"-a{offset:g}" if angle_offset_deg else "")
     name_suffix = f", {offset:g}°, 반경 {radius_scale:.0%}" if route_type == "loop" else ""
     name = f"현위치 기반 {'순환' if route_type == 'loop' else '편도'} 코스 (기본{name_suffix})"
 
@@ -922,6 +927,8 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
         course["safety_breakdown"] = score_components(full_path, points["cctv"], points["convenience"], points["police"])
         course["safety_score"] = safety_index(full_path, points["cctv"], points["convenience"], points["police"])
         course["traffic_signal_count"] = _signals_on(full_path, points["signals"])
+    if area is not None and getattr(area, "graph", None) is not None:
+        course["junctions_per_km"] = junctions_per_km(full_path, area.graph)   # 흐름 점수에 쓴다
     # 풍경 태그는 요청값이 아니라 측정값으로 붙인다. "바다뷰를 요청했으니 바다뷰"라고 붙이면
     # 바다가 안 보이는 코스가 바다뷰로 나간다. 지형 데이터가 없는 곳이면 붙이지 않고 표시만 한다.
     measured = scenery.tags_for_path(full_path, course)
@@ -948,18 +955,29 @@ def _signals_on(path: list, signals: list) -> int:
     return sum(1 for s in close if any(haversine_m((s["lat"], s["lng"]), p) <= SIGNAL_ON_PATH_M for p in path))
 
 
-def generate_loop_candidates(lat: float, lng: float, target_distance_km: float, tags: set,
-                             route_type: str = "loop", night: bool = False) -> list[dict]:
-    """Generate distinct orientations; OSM-snaps only the first to limit external requests."""
-    # 출발점 주변의 길·지형은 지역당 한 번만 받는다(area_cache). 받아 둔 동네면 Overpass 호출이 없다.
+def area_reach_m(target_distance_km: float, route_type: str) -> float:
+    """코스를 짜려면 출발점에서 얼마나 멀리까지 길·지형을 받아 둬야 하나."""
     if route_type == "loop":
         reach_m = target_distance_km * 1000 * max(LOOP_RADIUS_SCALES) * max(SCENIC_REACH) / LOOP_LENGTH_PER_RADIUS
     else:
         reach_m = target_distance_km * 1000 / (2 if route_type == "roundtrip" else 1) / ONE_WAY_DETOUR
-    area = area_cache.load_area(lat, lng, radius_m=reach_m + SNAP_RADIUS_M)
+    return reach_m + SNAP_RADIUS_M
+
+
+def generate_loop_candidates(lat: float, lng: float, target_distance_km: float, tags: set,
+                             route_type: str = "loop", night: bool = False) -> list[dict]:
+    """Generate distinct orientations; OSM-snaps only the first to limit external requests."""
+    # 출발점 주변의 길·지형은 지역당 한 번만 받는다(area_cache). 받아 둔 동네면 Overpass 호출이 없다.
+    area = area_cache.load_area(lat, lng, radius_m=area_reach_m(target_distance_km, route_type))
+
+    def remember(course, angle, scale):
+        # 고른 뒤 크기를 고쳐 다시 짤 때 같은 자리·방향·모양·풍경으로 짜려고 남긴다 (POST /courses/deliver)
+        course["shape"] = {"lat": lat, "lng": lng, "route_type": route_type, "angle": angle,
+                           "radius_scale": scale, "tags": sorted(tags), "night": night}
+        return course
 
     if route_type != "loop":
-        return [generate_loop_course(lat, lng, target_distance_km, tags, route_type, area=area, night=night)]
+        return _one_way_candidates(lat, lng, target_distance_km, tags, route_type, area, night, remember)
 
     shapes = list(enumerate(zip(RETRY_ANGLE_OFFSETS_DEG, LOOP_RADIUS_SCALES)))
     if area is not None:
@@ -989,9 +1007,9 @@ def generate_loop_candidates(lat: float, lng: float, target_distance_km: float, 
     candidates = []
     errors = []
     with ThreadPoolExecutor(max_workers=len(shapes)) as pool:
-        for future in [pool.submit(build, shape) for shape in shapes]:
+        for (_, (angle, scale)), future in zip(shapes, [pool.submit(build, shape) for shape in shapes]):
             try:
-                candidates.append(future.result())
+                candidates.append(remember(future.result(), angle, scale))
             except (ValueError, requests.HTTPError) as error:
                 # 후보 하나가 실패해도 나머지 후보로 답한다
                 errors.append(str(error))
@@ -1011,7 +1029,7 @@ def generate_loop_candidates(lat: float, lng: float, target_distance_km: float, 
         angle, scale, actual = closest_shape
         corrected = min(max(scale * target_distance_km / actual, 0.4), 1.8)
         try:
-            candidates.append(generate_loop_course(
+            candidates.append(remember(generate_loop_course(
                 lat, lng, target_distance_km, tags, route_type=route_type,
                 angle_offset_deg=angle, snap_to_osm=False, radius_scale=corrected,
                 ways=ways if area is not None else fetch_runnable_ways(
@@ -1019,7 +1037,7 @@ def generate_loop_candidates(lat: float, lng: float, target_distance_km: float, 
                 area=area,
                 night=night,
                 measure_elevation=False,
-            ))
+            ), angle, corrected))
         except (ValueError, requests.HTTPError):
             pass
     useful = keep_useful_loops(candidates, target_distance_km)
@@ -1030,6 +1048,32 @@ def generate_loop_candidates(lat: float, lng: float, target_distance_km: float, 
         # 빈 목록을 내보내면 사용자는 결과 0개를 받는다. 실패로 알려서 저장된 코스로 넘어가게 한다.
         raise ValueError("이 주변에서는 목표 거리에 맞는 순환 코스를 만들지 못했습니다.")
     return useful
+
+
+def _one_way_candidates(lat, lng, target_distance_km, tags, route_type, area, night, remember):
+    """편도·왕복 후보: 세 방향으로 나가 본다. 같은 길로 모이면 하나만 남긴다.
+    한 방향도 안 되면 예전처럼 한 후보를 방향을 바꿔 가며 만든다."""
+    def build(offset):
+        return generate_loop_course(lat, lng, target_distance_km, tags, route_type=route_type,
+                                    angle_offset_deg=offset, area=area, night=night)
+
+    candidates, errors = [], []
+    with ThreadPoolExecutor(max_workers=len(ONE_WAY_OFFSETS_DEG)) as pool:
+        for offset, future in zip(ONE_WAY_OFFSETS_DEG, [pool.submit(build, o) for o in ONE_WAY_OFFSETS_DEG]):
+            try:
+                candidates.append(remember(future.result(), offset, 1.0))
+            except (ValueError, requests.HTTPError) as error:
+                errors.append(str(error))
+    if not candidates:
+        return [remember(generate_loop_course(lat, lng, target_distance_km, tags, route_type=route_type,
+                                              area=area, night=night), None, 1.0)]
+    kept = []
+    for course in candidates:
+        path = course.get("path") or []
+        if any(path and k.get("path") and _overlap(path, k["path"]) >= DUPLICATE_OVERLAP for k in kept):
+            continue
+        kept.append(course)
+    return kept
 
 
 NIGHT_SECLUDED_SLACK = 0.05   # 밤에는 인적 드문 구간이 가장 적은 후보와 이만큼 안에 드는 후보만 남긴다
@@ -1071,8 +1115,9 @@ def keep_useful_loops(candidates: list, target_distance_km: float) -> list:
     """
     useful = [c for c in candidates if c.get("distance_km", 0) >= target_distance_km * MIN_LOOP_RATIO]
     useful.sort(key=lambda c: abs(c.get("distance_km", 0) - target_distance_km))
-    # 요청 거리와 5% 안인 후보가 있으면 그것만 남긴다 (풍경 점수가 높아도 거리가 크게 다르면 안 된다)
-    close = [c for c in useful if abs(c.get("distance_km", 0) - target_distance_km) <= target_distance_km * DISTANCE_OK]
+    # 요청 거리와 10% 안인 후보가 있으면 그것만 남긴다 (풍경 점수가 높아도 거리가 크게 다르면 안 된다).
+    # 5%가 아니라 10%인 건 러너가 고를 수 있게 하려고다 — 고른 코스는 실제 경로로 이을 때 5% 안으로 맞춘다
+    close = [c for c in useful if abs(c.get("distance_km", 0) - target_distance_km) <= target_distance_km * CHOICE_OK]
     useful = close or useful
     kept = []
     for course in useful:

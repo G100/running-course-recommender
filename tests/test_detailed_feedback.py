@@ -30,9 +30,9 @@ class TestLearning:
         before = dict(profile["weights"])
         ps.learn_aspects(profile, {"stops": "many"})
         after = profile["weights"]
-        assert after["signal_free"] > before["signal_free"] * 1.2
+        assert after["flow"] > before["flow"] * 1.2
         # 나머지는 합을 1로 맞추느라 같은 비율로 조금 줄 뿐, 서로의 순서는 그대로다
-        others = [k for k in before if k != "signal_free"]
+        others = [k for k in before if k != "flow"]
         ratios = {round(after[k] / before[k], 6) for k in others}
         assert len(ratios) == 1 and ratios.pop() < 1
 
@@ -40,9 +40,9 @@ class TestLearning:
         gain = {}
         for answer in ("many", "few", "ok"):
             profile = ps.new_profile("u")
-            base = profile["weights"]["signal_free"]
+            base = profile["weights"]["flow"]
             ps.learn_aspects(profile, {"stops": answer})
-            gain[answer] = profile["weights"]["signal_free"] / base
+            gain[answer] = profile["weights"]["flow"] / base
         assert gain["many"] > gain["few"] > 1 > gain["ok"]
 
     def test_adjustment_is_bounded(self):
@@ -81,7 +81,7 @@ class TestApi:
     def test_questions_are_served_so_the_app_does_not_hardcode_them(self):
         questions = client.get("/onboarding/feedback").json()["questions"]
         # 오르막은 고도 데이터를 믿을 수 있을 때까지 묻지 않는다
-        assert [q["key"] for q in questions] == ["distance", "stops", "scenery", "safety"]
+        assert [q["key"] for q in questions] == ["distance", "stops", "scenery", "cars"]
         assert all(len(q["options"]) == 3 and q["question"].endswith("?") for q in questions)
 
     def test_answers_are_stored_with_the_review(self, courses):

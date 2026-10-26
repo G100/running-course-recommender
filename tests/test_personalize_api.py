@@ -6,14 +6,14 @@ from src.api import main
 
 client = TestClient(main.app)
 
-# 한적한 길: 신호등이 없는 대신 오르막이 심하고 안전점수가 낮다.
-# 번화한 길: 신호등이 좀 있지만 고도가 딱 맞고 안전점수가 높다.
+# 한적한 길: 신호등이 없어 쭉 달리지만 차 없는 길은 적다.
+# 번화한 길: 신호등이 좀 있지만 대부분 차 없는 길이다.
 # 기본 가중치로는 번화한 길이 앞선다 — 평가로 이 순위가 뒤집히는지 본다.
 QUIET = {"id": "quiet", "name": "한적한 길", "region": "여수", "path": [[34.0, 127.0], [34.03, 127.0]],
          "distance_km": 5.0, "elevation_gain_m": 150, "tags": [], "traffic_signal_count": 0,
-         "safety_score": 0.3, "green_ratio": 0.5}
+         "road_mix": {"sidewalk": 0.9, "car_free": 0.1}}
 BUSY = {**QUIET, "id": "busy", "name": "번화한 길", "elevation_gain_m": 60,
-        "traffic_signal_count": 8, "safety_score": 0.9}
+        "traffic_signal_count": 8, "road_mix": {"sidewalk": 0.0, "car_free": 1.0}}
 
 
 def _recommend(user_id, **extra):
@@ -29,7 +29,7 @@ def _stub_courses(monkeypatch):
 def test_recommend_returns_why_each_course_scored(monkeypatch):
     _stub_courses(monkeypatch)
     result = _recommend("runner-a").json()["results"][0]
-    assert set(result["score_breakdown"]) == {"distance", "safety", "signal_free", "tag_match", "time_fit"}
+    assert set(result["score_breakdown"]) == {"distance", "tag_match", "flow", "car_free"}
 
 
 def test_feedback_updates_the_profile_and_explains_it(monkeypatch):
@@ -40,9 +40,9 @@ def test_feedback_updates_the_profile_and_explains_it(monkeypatch):
     body = resp.json()
     assert body["n_feedback"] == 1
     changes = {row["factor"]: row["change"] for row in body["explanation"]}
-    # 만족한 코스가 강했던 항목(신호등)은 오르고, 약했던 항목(안전)은 내려간다
-    assert changes["signal_free"] > 0
-    assert changes["safety"] < 0
+    # 만족한 코스가 강했던 항목(흐름)은 오르고, 약했던 항목(차 없는 길)은 내려간다
+    assert changes["flow"] > 0
+    assert changes["car_free"] < 0
 
 
 def test_factor_shared_by_all_recommended_courses_is_not_learned(monkeypatch):
@@ -54,15 +54,15 @@ def test_factor_shared_by_all_recommended_courses_is_not_learned(monkeypatch):
     # 거리와 풍경은 두 코스가 똑같았다 — 선택에 영향이 없었으니 서로의 비율이 그대로여야 한다.
     # (다른 항목이 줄면 합을 1로 맞추느라 둘 다 같은 비율로 조금 오를 수는 있다)
     assert after["distance"] / after["tag_match"] == pytest.approx(before["distance"] / before["tag_match"], rel=0.02)
-    # 실제로 선택을 가른 신호등은 비율 자체가 커져야 한다
-    assert after["signal_free"] / after["tag_match"] > before["signal_free"] / before["tag_match"] * 1.1
+    # 실제로 선택을 가른 흐름(신호등)은 비율 자체가 커져야 한다
+    assert after["flow"] / after["tag_match"] > before["flow"] / before["tag_match"] * 1.1
 
 
 def test_feedback_changes_the_next_recommendation(monkeypatch):
-    """신호등 없는 길을 계속 높게 평가한 사람에게는 안전점수가 높아도 신호 많은 길이 밀려야 한다."""
+    """신호등 없는 길을 계속 높게 평가한 사람에게는 차 없는 길이어도 신호 많은 길이 밀려야 한다."""
     _stub_courses(monkeypatch)
     first = [r["course"]["id"] for r in _recommend("runner-c").json()["results"]]
-    assert first[0] == "busy"  # 처음엔 안전점수가 높은 쪽이 앞선다
+    assert first[0] == "busy"  # 처음엔 차 없는 길이 많은 쪽이 앞선다
 
     for _ in range(10):
         _recommend("runner-c")
@@ -99,7 +99,7 @@ def test_profile_shows_learned_preferences(monkeypatch):
     profile = client.get("/profile/runner-f").json()
     assert profile["n_feedback"] == 1
     assert profile["survey"]["preferred_distance_km"] == 5
-    assert "signal_free" in profile["weights"]
+    assert "flow" in profile["weights"]
 
 
 def test_recommending_without_user_id_learns_nothing(monkeypatch):

@@ -18,6 +18,7 @@ import os
 from ..api_clients.tmap_pedestrian import extract_path, get_route
 from ..data_collection.enrich import haversine_m
 from . import sidewalk
+from .flow import junctions_per_km
 
 MATCH_M = 35        # 이만큼 안이면 같은 길 (넓은 길은 맞은편 인도까지 30m 가까이 된다)
 PER_CALL = 5        # Tmap passList 한도
@@ -378,7 +379,8 @@ def follow(graph, plan_path: list, start: tuple = None, end: tuple = None, targe
     if cleaned is not route:
         route = cleaned
         result = dict(check(route, used_plan, graph), replanned=result["replanned"])
-    result.update(calls=calls, waypoints=len(points))
+    result.update(calls=calls, waypoints=len(points),
+                  junctions_per_km=junctions_per_km(extract_path(route)[0], graph))   # 실제로 달리는 길의 갈림길
     return dict(route, follow=result)
 
 

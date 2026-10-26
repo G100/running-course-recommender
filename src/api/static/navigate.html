@@ -3,233 +3,337 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>러닝 코스 추천 · 실시간</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,340..600&family=Gothic+A1:wght@400;500;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<title>런메이트</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
+  /* 디자인: Figma 디자인 시스템 분석(DESIGN-figma.md)의 토큰을 따른다.
+     바탕은 흰색·검정 글씨, 버튼은 전부 알약 모양. 이야기가 바뀌는 덩어리마다 큰 파스텔 색 판
+     (라임·라일락·크림·민트·핑크·코랄·네이비)을 하나씩 깐다. 한 화면에 색 판은 하나만.
+     글꼴: figmaSans 대신 Pretendard Variable(가는 굵기를 그대로 쓸 수 있다),
+     figmaMono 대신 JetBrains Mono(작은 영문 대문자 라벨에만). 회색 글씨는 쓰지 않고 굵기로 위계를 준다. */
   :root{
-    --paper:#EFF1E9; --surface:#FFFFFF; --ink:#1C2620; --muted:#5B6B5E; --line:#DCE1D3;
-    --accent:#2F6F4E; --accent-ink:#F6FBF7; --accent-soft:#E3EEE7;
-    --coast:#2C6E8E; --coast-soft:#E1EDF1; --warn:#B4651C; --warn-soft:#F3E7DA;
-    --navblue:#1A6FE0; --navblue-dark:#14203B;
-    --shadow: 0 1px 2px rgba(28,38,32,.06), 0 8px 24px -12px rgba(28,38,32,.18);
+    --ink:#000000; --canvas:#ffffff; --soft:#f7f7f5;
+    --hairline:#e6e6e6; --hairline-soft:#f1f1f1;
+    --lime:#dceeb1; --lilac:#c5b0f4; --cream:#f4ecd6; --pink:#efd4d4; --mint:#c8e6cd; --coral:#f3c9b6; --navy:#1f1d3d;
+    --magenta:#ff3d8b; --success:#1ea64a;
+    /* 폰 화면(런메이트 앱): 흰 바탕 + 일렉트릭 블루(주색) + 코랄(고른 것·강조), 글씨는 남색 */
+    --run-bg:#ffffff; --run-top:#f2f5ff; --run-line:#dce3f5; --run-ink:#10142a; --run-mute:#5b6478;
+    --accent:#2f6bff; --accent-soft:rgba(47,107,255,.10);
+    --coral:#ff6b4a; --coral-ink:#b83a1f; --coral-soft:rgba(255,107,74,.12);
+    --float-shadow:0 6px 20px rgba(16,20,42,.14);
+    --num:"Big Shoulders Display","Pretendard Variable",sans-serif;
+    --sans:"Pretendard Variable","Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+    --mono:"JetBrains Mono","Pretendard Variable",ui-monospace,monospace;
   }
   *{box-sizing:border-box;}
   [hidden]{ display:none !important; }
-  body{ margin:0; background:var(--paper); color:var(--ink); font-family:"Gothic A1","Apple SD Gothic Neo",sans-serif; }
-  .wrap{ max-width:1180px; margin:0 auto; padding:28px 22px 48px; display:flex; flex-direction:column; gap:18px; }
-  .eyebrow{ font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.06em; color:var(--muted); text-transform:uppercase; }
-  h1{ font-family:"Fraunces",Georgia,serif; font-weight:560; font-style:italic; font-size:clamp(24px,3.4vw,32px); margin:2px 0 0; }
-  .sub{ color:var(--muted); font-size:13.5px; max-width:70ch; line-height:1.5; margin:4px 0 0; }
+  body{ margin:0; background:var(--canvas); color:var(--ink); font-family:var(--sans); font-size:18px; font-weight:320;
+    line-height:1.45; letter-spacing:-.26px; font-kerning:normal; }
+  button, input{ font-family:inherit; letter-spacing:inherit; }
+  button:focus-visible, input:focus-visible{ outline:2px solid var(--ink); outline-offset:2px; }
+  b, strong{ font-weight:540; }
 
-  .layout{ display:grid; grid-template-columns:290px 1fr; gap:18px; align-items:start; }
-  @media (max-width:820px){ .layout{ grid-template-columns:1fr; } }
+  .wrap{ max-width:1280px; margin:0 auto; padding:0 48px 96px; display:flex; flex-direction:column; gap:48px; }
+  @media (max-width:768px){ .wrap{ padding:0 24px 64px; } }
 
-  .panel{ background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:18px; display:flex; flex-direction:column; gap:16px; box-shadow:var(--shadow); }
-  .field{ display:flex; flex-direction:column; gap:7px; }
-  .field label{ font-size:12px; font-weight:700; color:var(--muted); }
+  /* 표제: 아주 크고 가는 글씨, 자간을 좁게 */
+  header{ padding-top:64px; display:flex; flex-direction:column; gap:16px; }
+  .eyebrow{ font-family:var(--mono); font-size:14px; font-weight:400; letter-spacing:.54px; text-transform:uppercase; }
+  h1{ font-weight:340; font-size:clamp(48px,7vw,86px); line-height:1; letter-spacing:-1.72px; margin:0; text-wrap:balance; }
+  .sub{ font-size:20px; font-weight:330; line-height:1.4; letter-spacing:-.14px; max-width:58ch; margin:0; }
+
+  .layout{ display:grid; grid-template-columns:400px 1fr; gap:48px; align-items:start; }
+  @media (max-width:960px){ .layout{ grid-template-columns:1fr; } }
+
+  /* 데모 준비(계정·출발지): 옅은 회색 판. 달리기 조건은 폰 안 시작 화면에서 고른다 */
+  .panel{ background:var(--soft); border-radius:24px; padding:40px 32px; display:flex; flex-direction:column; gap:32px; }
+  @media (max-width:768px){ .panel{ border-radius:0; margin:0 -24px; padding:32px 24px; } }
+  .field{ display:flex; flex-direction:column; gap:12px; }
+  .field label{ font-family:var(--mono); font-size:12px; font-weight:500; letter-spacing:.6px; text-transform:uppercase; }
   .row-between{ display:flex; justify-content:space-between; align-items:baseline; }
-  .val{ font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:12.5px; }
+  .val{ font-size:26px; font-weight:540; letter-spacing:-.26px; font-variant-numeric:tabular-nums; }
 
-  input[type=range]{ -webkit-appearance:none; width:100%; height:4px; border-radius:2px; background:var(--line); }
-  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:15px; height:15px; border-radius:50%; background:var(--accent); border:2px solid var(--surface); box-shadow:0 0 0 1px var(--accent); cursor:pointer; margin-top:-6px; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; width:100%; height:2px; background:var(--ink); margin:12px 0; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:24px; height:24px; border-radius:50%; background:var(--ink); border:4px solid var(--canvas); cursor:pointer; }
+  input[type=range]::-moz-range-thumb{ width:16px; height:16px; border-radius:50%; background:var(--ink); border:4px solid var(--canvas); cursor:pointer; }
 
-  .seg{ display:flex; gap:6px; flex-wrap:wrap; }
-  .seg button, .chip{ padding:7px 10px; border-radius:8px; border:1px solid var(--line); background:var(--paper); color:var(--muted); font:inherit; font-size:12.5px; font-weight:500; cursor:pointer; }
-  .seg button.on, .chip.on{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-weight:700; }
-  .chip{ border-radius:999px; }
-  .chip.on{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
-  .chip.on[data-tag="바다"]{ background:var(--coast-soft); border-color:var(--coast); color:var(--coast); }
-  .chip small{ margin-left:6px; font-size:11px; font-weight:500; opacity:.7; }
-  .chips{ display:flex; flex-direction:column; gap:8px; }
-  .places{ list-style:none; margin:6px 0 0; padding:0; border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--paper); }
-  .places li{ padding:8px 10px; cursor:pointer; border-top:1px solid var(--line); font-size:13px; }
+  /* 고르는 칩: 흰 알약, 고르면 검정 알약 (선택 = 주 버튼과 같은 모양) */
+  .seg{ display:flex; gap:8px; flex-wrap:wrap; }
+  .seg button, .chip{ padding:8px 18px 10px; min-height:44px; border-radius:50px; border:0; background:var(--canvas); color:var(--ink);
+    font-size:16px; font-weight:480; cursor:pointer; }
+  .seg button.on, .chip.on{ background:var(--ink); color:var(--canvas); }
+  .chip small{ margin-left:6px; font-size:13px; font-weight:330; }
+  .chips{ display:flex; flex-direction:column; gap:16px; }
+  .chip-row{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .chip-group{ flex:0 0 100%; font-size:16px; font-weight:540; }
+
+  .places{ list-style:none; margin:0; padding:0; background:var(--canvas); border-radius:8px; overflow:hidden; }
+  .places li{ padding:12px 14px; cursor:pointer; border-top:1px solid var(--hairline-soft); font-size:16px; font-weight:480; }
   .places li:first-child{ border-top:0; }
-  .places li:hover, .places li:focus{ background:var(--accent-soft); outline:none; }
-  .places li small{ display:block; margin-top:2px; font-size:11.5px; color:var(--muted); }
-  .chip-row{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
-  .chip-group{ flex:0 0 100%; font-size:11.5px; font-weight:700; color:var(--muted); }
+  .places li:hover, .places li:focus{ background:var(--soft); outline:none; }
+  .places li small{ display:block; margin-top:2px; font-size:14px; font-weight:330; }
 
-  .locbtns{ display:flex; flex-direction:column; gap:6px; }
-  .locbtns button{ text-align:left; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--paper); color:var(--ink); font:inherit; font-size:12.5px; cursor:pointer; }
-  .locbtns button.on{ border-color:var(--accent); background:var(--accent-soft); color:var(--accent); font-weight:700; }
-  .locbtns .d{ color:var(--muted); font-size:11px; }
+  .locbtns{ display:flex; flex-direction:column; gap:8px; }
+  .locbtns button{ text-align:left; padding:10px 20px 12px; min-height:48px; border-radius:50px; border:1px solid var(--hairline); background:var(--canvas); color:var(--ink);
+    font-size:16px; font-weight:480; cursor:pointer; }
+  .locbtns button.on{ background:var(--ink); color:var(--canvas); }
+  .locbtns .d{ font-size:14px; font-weight:330; }
 
-  .go{ width:100%; padding:12px; border-radius:10px; border:none; background:var(--accent); color:var(--accent-ink); font:inherit; font-weight:700; font-size:14px; cursor:pointer; }
-  .go:disabled{ opacity:.55; cursor:default; }
-  .field input[type=text]{ width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:9px;
-    font-size:13px; font-family:inherit; box-sizing:border-box; background:#fff; }
-  .hint{ font-size:11.5px; color:var(--muted); line-height:1.5; border-top:1px solid var(--line); padding-top:12px; }
+  /* 주 행동: 검정 알약 */
+  .go, .startbtn, .rate-send{ width:100%; min-height:52px; padding:10px 20px; border-radius:50px; border:0; background:var(--ink); color:var(--canvas);
+    font-size:20px; font-weight:480; letter-spacing:-.1px; cursor:pointer; transition:transform .12s ease; }
+  .go:active, .startbtn:active, .rate-send:active{ transform:scale(.97); }
+  .go:disabled, .rate-send:disabled{ opacity:.35; cursor:default; }
+  .simbtn{ width:100%; min-height:48px; padding:8px 18px 10px; border-radius:50px; border:1px solid var(--ink); background:var(--canvas); color:var(--ink);
+    font-size:18px; font-weight:480; cursor:pointer; }
+  .field input[type=text]{ width:100%; padding:12px 14px; border:1px solid var(--hairline); border-radius:8px;
+    font-size:16px; font-weight:330; background:var(--canvas); color:var(--ink); }
+  .field input[type=text]:focus{ outline:none; border-color:var(--ink); box-shadow:0 0 0 1px var(--ink); }
+  .hint{ font-size:14px; font-weight:330; line-height:1.45; letter-spacing:-.14px; margin:0; }
 
-  .stage{ display:flex; flex-direction:column; align-items:center; gap:14px; min-width:0; }
-  .status{ font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--muted); min-height:18px; align-self:flex-start; }
-  .status.live{ color:var(--accent); }
-  .choice{ align-self:stretch; border:1px solid var(--line); border-radius:12px; background:var(--paper); padding:10px 12px; font-size:13.5px; }
-  .choice p{ margin:0 0 8px; }
-  .choice div{ display:flex; flex-wrap:wrap; gap:6px; }
-  .choice button{ font:inherit; font-size:13px; border:1px solid var(--line); border-radius:999px; padding:5px 12px; background:var(--paper); cursor:pointer; }
-  .choice button.yes{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .stage{ display:flex; flex-direction:column; align-items:center; gap:24px; min-width:0; }
+  .status{ font-family:var(--mono); font-size:13px; letter-spacing:.5px; min-height:20px; align-self:flex-start; }
+  .status.live{ font-weight:500; }
+  /* 사용자에게 고르게 하는 안내: 라일락 배너 + 마젠타 알약 하나 */
+  .choice{ align-self:stretch; background:var(--lilac); border-radius:8px; padding:16px 24px; font-size:16px; font-weight:330; }
+  .choice p{ margin:0 0 12px; font-weight:480; }
+  .choice div{ display:flex; flex-wrap:wrap; gap:8px; }
+  .choice button{ font-size:16px; font-weight:480; border:0; border-radius:50px; padding:8px 18px 10px; background:var(--canvas); color:var(--ink); cursor:pointer; }
+  .choice button.yes{ background:var(--magenta); color:var(--canvas); }
 
-  /* ---- 폰 프레임: 실제 내비게이션 앱처럼 세로 화면으로 보여준다 ---- */
+  /* ---- 폰 프레임: 런메이트 앱 화면 ---- */
   .phone{
-    position:relative; width:390px; max-width:100%; height:760px;
-    border-radius:34px; overflow:hidden; background:#0C1410;
-    box-shadow:0 24px 60px -20px rgba(20,30,20,.55), 0 0 0 8px #0C1410, 0 0 0 9px #33403A;
+    position:relative; width:390px; max-width:100%; height:780px;
+    border-radius:44px; overflow:hidden; background:var(--run-bg); color:var(--run-ink);
+    box-shadow:0 0 0 10px var(--ink), 0 4px 16px 10px rgba(0,0,0,.06);
   }
-  .phone-map{ position:absolute; inset:0; overflow:hidden; background:#0b1a20; }
+  .phone-map{ position:absolute; inset:0; overflow:hidden; background:var(--run-bg); }
   /* 헤딩업(진행방향 위쪽) 회전을 CSS로 흉내낸다: 실제 뷰포트보다 훨씬 크게 그려서
      어느 각도로 돌려도 모서리에 빈 공간이 안 보이게 하고, 중심을 기준으로 회전시킨다. */
   #map{
     position:absolute; top:50%; left:50%; width:230%; height:230%;
     transform:translate(-50%,-50%) rotate(0deg); transform-origin:center center;
-    background:#0b1a20; will-change:transform;
+    background:var(--run-bg); will-change:transform;
   }
-  .empty-state{
-    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-    color:var(--muted); font-size:13.5px; text-align:center; padding:0 40px; background:var(--accent-soft); z-index:2;
-  }
-  .compass-btns{
-    position:absolute; right:14px; bottom:96px; z-index:1150; display:flex; flex-direction:column; gap:10px;
-  }
-  .compass-btns button{
-    width:38px; height:38px; border-radius:50%; border:none; background:rgba(20,28,26,.85); color:#fff;
-    font-size:15px; cursor:pointer; box-shadow:0 3px 10px -2px rgba(0,0,0,.5); backdrop-filter:blur(2px);
-  }
-  .compass-btns button{ display:flex; align-items:center; justify-content:center; }
 
-  /* 상단 대형 안내 배너 (실제 내비 느낌의 핵심) */
+  /* 시작 화면: 한 화면에 질문 하나씩. ① 거리 → ② 모양 → ③ 풍경 → 코스 찾기 */
+  .quickstart{ position:absolute; inset:0; z-index:5; background:var(--run-bg); color:var(--run-ink);
+    display:flex; flex-direction:column; padding:52px 24px 24px; }
+  .qs-top{ display:flex; align-items:center; gap:10px; min-height:40px; }
+  .qs-back{ width:40px; height:40px; border-radius:50%; border:0; background:var(--run-top); color:var(--run-ink);
+    font-size:18px; cursor:pointer; flex:0 0 auto; }
+  .qs-back[disabled]{ visibility:hidden; }
+  .qs-dots{ display:flex; gap:6px; }
+  .qs-dots i{ width:22px; height:4px; border-radius:2px; background:var(--run-line); }
+  .qs-dots i.on{ background:var(--accent); }
+  .qs-place{ margin-left:auto; max-width:50%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:480;
+    color:var(--run-mute); background:var(--run-top); border-radius:50px; padding:6px 14px; }
+  .qs-step-page{ flex:1; display:flex; flex-direction:column; min-height:0; }
+  .qs-step-page[hidden]{ display:none !important; }
+  .qs-q{ margin:40px 0 6px; font-size:34px; font-weight:800; line-height:1.15; letter-spacing:-.8px; }
+  .qs-sub{ margin:0 0 28px; font-size:14px; color:var(--run-mute); }
+  .qs-next{ margin-top:auto; width:100%; height:56px; border-radius:16px; border:0; background:var(--accent); color:#fff;
+    font-size:18px; font-weight:700; cursor:pointer; }
+  .qs-next:active{ transform:scale(.98); }
+  .qs-summary{ margin:0 0 10px; font-size:13px; color:var(--run-mute); text-align:center; }
+
+  /* ① 거리: 다이얼. 시계 방향으로 돌리면 1km → 10km (0.5km씩). 아래 트인 곳에 −/+ */
+  .qs-dial{ position:relative; width:250px; max-width:100%; aspect-ratio:1; margin:4px auto 0; touch-action:none; user-select:none; }
+  .qs-dial svg{ position:absolute; inset:0; width:100%; height:100%; overflow:visible; cursor:grab; }
+  .qs-dial svg:active{ cursor:grabbing; }
+  .qs-dial .dial-track{ fill:none; stroke:var(--run-line); stroke-width:18; stroke-linecap:round; }
+  .qs-dial .dial-fill{ fill:none; stroke:var(--accent); stroke-width:18; stroke-linecap:round; }
+  .qs-dial .dial-tick{ stroke:var(--run-line); stroke-width:2; stroke-linecap:round; }
+  .qs-dial .dial-tick.major{ stroke:var(--run-mute); }
+  .qs-dial .dial-label{ fill:var(--run-mute); font-family:var(--num); font-weight:700; font-size:13px; text-anchor:middle; dominant-baseline:middle; }
+  .qs-dial .dial-knob{ fill:#fff; stroke:var(--accent); stroke-width:5; }
+  .qs-dial .dial-knob:focus{ outline:none; }
+  .qs-dial .dial-knob:focus-visible{ stroke:var(--run-ink); stroke-width:7; }
+  .qs-dial-center{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; }
+  .qs-dial-center .qs-number{ font-family:var(--num); font-weight:900; font-size:76px; line-height:.85; font-variant-numeric:tabular-nums; }
+  .qs-dial-center .qs-unit{ font-size:15px; font-weight:540; color:var(--run-mute); margin-top:4px; }
+  .qs-dial-steps{ position:absolute; left:0; right:0; bottom:-2%; display:flex; justify-content:center; gap:44px; }
+  .qs-stepbtn{ width:40px; height:40px; border-radius:50%; border:0; background:var(--run-top); color:var(--run-ink); font-size:22px; cursor:pointer; }
+  .qs-stepbtn:active{ transform:scale(.94); }
+  .qs-presets{ display:flex; justify-content:center; gap:8px; margin-top:14px; }
+  .qs-presets button{ min-width:58px; height:40px; border-radius:50px; border:2px solid transparent; background:var(--run-top); color:var(--run-ink);
+    font-size:15px; font-weight:600; cursor:pointer; }
+  .qs-presets button.on{ background:var(--coral); color:#fff; }
+  .quickstart input[type=range]{ position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+
+  /* ② 모양: 큰 카드 셋, 모양을 선으로 보여준다 */
+  .quickstart .seg{ display:flex; flex-direction:column; gap:10px; }
+  .quickstart .seg button{ display:flex; align-items:center; gap:16px; padding:16px 18px; border-radius:18px; border:2px solid transparent;
+    background:var(--run-top); color:var(--run-ink); text-align:left; cursor:pointer; font-size:18px; font-weight:700; }
+  .quickstart .seg button small{ display:block; font-size:13px; font-weight:400; color:var(--run-mute); margin-top:2px; }
+  .quickstart .seg button svg{ width:46px; height:46px; flex:0 0 auto; fill:none; stroke:var(--run-mute); stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
+  .quickstart .seg button.on{ border-color:var(--accent); background:var(--accent-soft); }
+  .quickstart .seg button.on svg{ stroke:var(--accent); }
+
+  /* ③ 풍경: 칩을 여러 줄로. 안 골라도 된다 */
+  .quickstart .chips{ flex-direction:row; flex-wrap:wrap; gap:8px; max-height:300px; overflow-y:auto; }
+  .quickstart .chip-row{ display:contents; }
+  .quickstart .chip-group{ display:none; }
+  .quickstart .chip{ min-height:44px; padding:8px 16px; background:var(--run-top); color:var(--run-ink); font-size:16px; font-weight:540; border:2px solid transparent; }
+  .quickstart .chip small{ color:var(--run-mute); font-size:12px; }
+  .quickstart .chip.on{ background:var(--accent-soft); border-color:var(--accent); color:var(--run-ink); }
+  .quickstart .chip.on small{ color:var(--run-ink); }
+  .quickstart .hint{ color:var(--run-mute); font-size:13px; margin-top:12px; }
+  .quickstart .go{ margin-top:auto; width:100%; height:56px; min-height:0; border-radius:16px; background:var(--accent); color:#fff;
+    font-size:18px; font-weight:700; }
+  .quickstart .go:disabled{ opacity:1; background:var(--run-top); color:var(--run-mute); }
+
+  .compass-btns{ position:absolute; right:16px; bottom:112px; z-index:1150; display:flex; flex-direction:column; gap:8px; }
+  .compass-btns button{
+    width:44px; height:44px; border-radius:50%; border:0; background:var(--run-bg); color:var(--run-ink); box-shadow:var(--float-shadow);
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .compass-btns svg{ width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+
+  /* 달리는 중 위 안내: 검정 판, 남은 거리는 볼트 큰 숫자 */
   .turn-primary{
-    position:absolute; top:0; left:0; right:0; z-index:1200;
-    background:var(--navblue); color:#fff; padding:34px 18px 16px;
+    position:absolute; top:12px; left:12px; right:12px; z-index:1200;
+    background:var(--run-bg); color:var(--run-ink); padding:30px 20px 16px; border-radius:24px; box-shadow:var(--float-shadow);
     display:flex; align-items:center; gap:16px;
-    border-radius:0 0 22px 22px; box-shadow:0 10px 24px -8px rgba(0,0,0,.4);
   }
-  .turn-primary .mode-badge{
-    position:absolute; top:8px; left:18px; font-size:10.5px; font-weight:700;
-    background:rgba(255,255,255,.18); padding:3px 9px; border-radius:999px; letter-spacing:.02em;
-  }
-  .turn-primary .arrow{ font-size:46px; font-weight:800; line-height:1; width:56px; height:56px; text-align:center; flex-shrink:0; text-shadow:0 2px 6px rgba(0,0,0,.25); }
-  .turn-svg{ width:100%; height:100%; overflow:visible; filter:drop-shadow(0 2px 4px rgba(0,0,0,.25)); }
-  .turn-svg path{ fill:none; stroke:currentColor; stroke-width:7; stroke-linecap:round; stroke-linejoin:round; }
+  .turn-primary .mode-badge{ position:absolute; top:12px; left:20px; font-size:11px; font-weight:540; color:var(--run-mute); }
+  .turn-primary .arrow{ font-size:46px; font-weight:700; line-height:1; width:56px; height:56px; text-align:center; flex-shrink:0; color:var(--accent); }
+  .turn-svg{ width:100%; height:100%; overflow:visible; }
+  .turn-svg path{ fill:none; stroke:currentColor; stroke-width:6; stroke-linecap:round; stroke-linejoin:round; }
   .turn-svg .head{ transform-origin:28px 31px; transition:transform .45s cubic-bezier(.2,.8,.2,1); }
   .turn-secondary .arrow{ width:18px; height:18px; }
   .turn-secondary .turn-svg path{ stroke-width:8; }
-  @media (prefers-reduced-motion: reduce){ .turn-svg .head{ transition:none; } }
+  @media (prefers-reduced-motion: reduce){ .turn-svg .head{ transition:none; } .go, .startbtn, .rate-send{ transition:none; } }
   .turn-primary .meta{ min-width:0; }
-  .turn-primary .dist{ font-family:"IBM Plex Mono",monospace; font-size:34px; font-weight:600; line-height:1.05; font-variant-numeric:tabular-nums; }
-  .turn-primary .street{ font-size:14px; font-weight:500; opacity:.92; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .turn-primary .dist{ font-family:var(--num); font-weight:800; font-size:60px; line-height:.9; color:var(--accent); font-variant-numeric:tabular-nums; }
+  .turn-primary .street{ font-size:16px; font-weight:480; margin-top:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
   .turn-secondary{
-    position:absolute; top:138px; left:14px; right:14px; z-index:1200;
-    background:var(--navblue-dark); color:#DCE4F5; border-radius:12px; padding:9px 14px;
-    display:flex; align-items:center; gap:10px; font-size:12.5px;
-    box-shadow:0 6px 16px -6px rgba(0,0,0,.4);
+    position:absolute; top:142px; left:24px; right:24px; z-index:1200;
+    background:var(--run-top); color:var(--run-ink); border-radius:50px; padding:8px 18px 10px;
+    display:flex; align-items:center; gap:10px; font-size:14px; font-weight:480;
   }
   .turn-secondary .arrow{ font-size:16px; flex-shrink:0; display:inline-block; }
   .turn-secondary .txt{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
-  /* 경로 확인 시트 (내비게이션 시작 전, 하단에 뜨는 카드) */
+  /* 코스 확인: 어두운 시트, 숫자는 크게 */
   .route-sheet{
-    position:absolute; left:0; right:0; bottom:0; z-index:1200;
-    background:var(--surface); border-radius:20px 20px 0 0; padding:18px 18px 20px;
-    box-shadow:0 -10px 30px -10px rgba(0,0,0,.25);
-    display:flex; flex-direction:column; gap:12px;
+    position:absolute; left:8px; right:8px; bottom:8px; z-index:1200;
+    background:var(--run-bg); color:var(--run-ink); border-radius:32px; padding:22px 22px 20px; box-shadow:var(--float-shadow);
+    display:flex; flex-direction:column; gap:14px;
   }
-  .route-sheet .name{ font-weight:800; font-size:16px; }
-  .route-sheet .region{ color:var(--muted); font-size:12.5px; font-weight:500; margin-left:6px; }
-  .route-sheet .stats{ display:flex; gap:18px; }
-  .route-sheet .stats .n{ font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:17px; font-variant-numeric:tabular-nums; }
-  .route-sheet .stats .l{ font-size:10.5px; color:var(--muted); }
-  .route-sheet .note{ font-size:11.5px; color:var(--muted); line-height:1.5; }
-  .route-sheet .note b{ color:var(--ink); }
-  .startbtn{
-    width:100%; padding:14px; border-radius:12px; border:none; background:var(--navblue); color:#fff;
-    font:inherit; font-weight:800; font-size:15px; cursor:pointer;
-  }
-  .simbtn{
-    width:100%; padding:10px; border-radius:10px; border:1px solid var(--line); background:none; color:var(--muted);
-    font:inherit; font-weight:600; font-size:12.5px; cursor:pointer;
-  }
+  .route-sheet .name{ font-weight:700; font-size:19px; line-height:1.3; letter-spacing:-.2px; }
+  .route-sheet .region{ display:block; font-size:13px; font-weight:480; color:var(--run-mute); margin-top:4px; }
+  .route-sheet .stats{ display:flex; gap:26px; }
+  .route-sheet .stats .n{ font-family:var(--num); font-weight:800; font-size:48px; line-height:.9; font-variant-numeric:tabular-nums; }
+  .route-sheet .stats .l{ font-size:12px; font-weight:480; color:var(--run-mute); margin-top:4px; }
+  .route-sheet .note{ font-size:13px; font-weight:330; line-height:1.45; color:var(--run-mute); max-height:58px; overflow-y:auto; }
+  .route-sheet .note b{ font-weight:540; color:var(--run-ink); }
+  .route-sheet .startbtn{ background:var(--accent); color:#fff; font-weight:800; }
+  .route-sheet .simbtn{ background:transparent; color:var(--run-ink); border:1px solid var(--run-line); }
+  .sheet-actions{ display:flex; gap:8px; }
+  /* 요청 거리와 5% 넘게 다를 때: 숨기지 않고 알린다 */
+  .off-target{ font-size:14px; font-weight:540; line-height:1.4; color:var(--coral-ink); background:var(--coral-soft); border-radius:12px; padding:10px 12px; }
+  /* 후보 고르기: 코스 카드 맨 위 알약 줄. 고른 코스만 흰 알약 */
+  .course-options{ display:flex; gap:6px; margin-right:52px; }
+  .course-options button{ flex:1; min-width:0; padding:6px 8px 8px; border-radius:14px; border:0; background:var(--run-top);
+    color:var(--run-ink); cursor:pointer; text-align:left; line-height:1.2; }
+  .course-options button b{ display:block; font-size:12px; font-weight:540; color:var(--run-mute); }
+  .course-options button span{ font-family:var(--num); font-weight:800; font-size:20px; font-variant-numeric:tabular-nums; }
+  .course-options button.on{ background:var(--run-ink); color:var(--run-bg); }
+  .course-options button.on b{ color:var(--run-bg); }
+  .course-options button:disabled{ opacity:.6; cursor:default; }
+  .sheet-actions .simbtn{ flex:1; }
+  .edit-btn{ flex:0 0 auto; min-height:48px; padding:8px 18px 10px; border-radius:50px; border:0; background:var(--run-top); color:var(--run-ink);
+    font-size:16px; font-weight:480; cursor:pointer; }
 
-  /* 하단 상태바 (내비게이션 진행 중) */
+  /* 달리는 중 아래 */
   .bottom-bar{
-    position:absolute; left:0; right:0; bottom:0; z-index:1200;
-    background:#111814; color:#fff; padding:14px 18px; padding-bottom:max(14px, env(safe-area-inset-bottom));
+    position:absolute; left:12px; right:12px; bottom:12px; z-index:1200;
+    background:var(--run-bg); color:var(--run-ink); padding:12px 14px; border-radius:50px; box-shadow:var(--float-shadow);
     display:flex; align-items:center; justify-content:space-between;
   }
-  .bottom-bar button{ background:none; border:none; color:#fff; font-size:19px; cursor:pointer; padding:6px; opacity:.85; }
-  .bottom-bar button:hover{ opacity:1; }
+  .bottom-bar button{ width:44px; height:44px; border-radius:50%; background:var(--run-top); border:0; color:var(--run-ink);
+    display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  .bottom-bar svg{ width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
   .bottom-bar .center{ text-align:center; }
-  .bottom-bar .eta{ font-family:"IBM Plex Mono",monospace; font-size:17px; font-weight:600; font-variant-numeric:tabular-nums; }
-  .bottom-bar .sub{ font-size:11px; color:#9FB0A6; margin-top:1px; font-variant-numeric:tabular-nums; }
+  .bottom-bar .eta{ font-family:var(--num); font-weight:800; font-size:32px; line-height:1; font-variant-numeric:tabular-nums; }
+  .bottom-bar .sub{ font-size:12px; font-weight:480; color:var(--run-mute); margin-top:2px; font-variant-numeric:tabular-nums; }
 
-  .rate-card{ position:absolute; left:14px; right:14px; bottom:96px; z-index:6; background:#fff; border-radius:16px;
-    padding:14px 16px; box-shadow:0 8px 28px rgba(0,0,0,.22); text-align:center; }
-  .rate-q{ font-weight:800; font-size:15px; margin-bottom:6px; }
+  /* 러닝 후 평가: 어두운 시트, 고른 답은 볼트 */
+  .rate-card{ position:absolute; left:8px; right:8px; bottom:84px; z-index:6; background:var(--run-bg); color:var(--run-ink); border-radius:32px; box-shadow:var(--float-shadow);
+    padding:26px 22px; text-align:center; max-height:calc(100% - 160px); overflow-y:auto; }
+  .rate-q{ font-weight:700; font-size:24px; line-height:1.3; letter-spacing:-.3px; margin-bottom:8px; }
   .stars{ display:flex; justify-content:center; gap:4px; }
-  .stars button{ border:0; background:none; font-size:30px; line-height:1; color:#d6d9df; cursor:pointer; padding:2px; }
-  .stars button.on{ color:#F5A623; }
-  .stars button:focus-visible{ outline:2px solid #1A6FE0; border-radius:6px; }
-  .rate-note{ font-size:12px; color:#6b7280; margin-top:6px; }
-  .rate-card{ max-height:calc(100% - 120px); overflow-y:auto; }
-  .rate-detail{ margin-top:8px; text-align:left; }
-  .rate-sub{ font-size:11.5px; color:#6b7280; text-align:center; margin-bottom:6px; }
-  .rate-row{ margin-top:7px; }
-  .rate-row .q{ font-size:12px; font-weight:700; color:#111827; margin-bottom:3px; }
-  .rate-row .opts{ display:flex; gap:4px; }
-  .rate-row .opts button{ flex:1; padding:6px 2px; border:1px solid #d6d9df; border-radius:8px; background:#fff; color:#374151;
-    font:inherit; font-size:11.5px; cursor:pointer; }
-  .rate-row .opts button.on{ background:#1A6FE0; border-color:#1A6FE0; color:#fff; font-weight:700; }
-  #rateComment{ width:100%; margin-top:9px; padding:7px 9px; border:1px solid #d6d9df; border-radius:8px; font:inherit; font-size:12.5px; }
-  .rate-send{ width:100%; margin-top:8px; padding:9px; border:0; border-radius:10px; background:#1A6FE0; color:#fff;
-    font:inherit; font-size:13.5px; font-weight:800; cursor:pointer; }
-  .rate-send:disabled{ opacity:.5; cursor:default; }
-  .account-row{ display:flex; gap:6px; margin-bottom:6px; align-items:center; }
-  .account-row input{ flex:1; min-width:0; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font:inherit; font-size:13px; background:var(--paper); color:inherit; }
-  .account-row button{ flex:1; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--paper); color:inherit; font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
-  .account-row strong{ flex:2; font-size:14px; }
-  #loginBtn{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
-  .route-sheet{ position:relative; }
-  .fav-btn{ position:absolute; top:10px; right:12px; border:0; background:none; font-size:24px; line-height:1; color:#9aa1ad; cursor:pointer; padding:4px; }
-  .fav-btn.on{ color:#F5A623; }
+  .stars button{ border:0; background:none; font-size:32px; line-height:1; color:var(--run-line); cursor:pointer; padding:4px; }
+  .stars button.on{ color:var(--coral); }
+  .rate-note{ font-size:13px; font-weight:330; color:var(--run-mute); margin-top:8px; }
+  .rate-detail{ margin-top:12px; text-align:left; }
+  .rate-sub{ font-size:13px; font-weight:330; color:var(--run-mute); text-align:center; margin-bottom:8px; }
+  .rate-row{ padding:12px 0; border-top:1px solid var(--run-line); }
+  .rate-row .q{ font-size:15px; font-weight:540; margin-bottom:8px; }
+  .rate-row .opts{ display:flex; gap:6px; }
+  .rate-row .opts button{ flex:1; min-height:40px; padding:6px 4px; border:0; border-radius:50px; background:var(--run-top); color:var(--run-ink);
+    font-size:13px; font-weight:480; cursor:pointer; }
+  .rate-row .opts button.on{ background:var(--accent); color:#fff; }
+  #rateComment{ width:100%; margin-top:12px; padding:12px 14px; border:0; border-radius:8px; background:var(--run-top); color:var(--run-ink); font-size:14px; font-weight:330; }
+  .rate-send{ margin-top:12px; }
+  .rate-card .rate-send{ background:var(--accent); color:#fff; font-weight:800; }
+
+  /* 계정 */
+  .account-row{ display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+  .account-row input{ flex:1; min-width:0; padding:12px 14px; border:1px solid var(--hairline); border-radius:8px; font-size:14px; font-weight:330; background:var(--canvas); color:inherit; }
+  .account-row input:focus{ outline:none; border-color:var(--ink); box-shadow:0 0 0 1px var(--ink); }
+  .account-row button{ flex:1; min-height:44px; padding:8px 18px 10px; border:0; border-radius:50px; background:var(--canvas); color:var(--ink); font-size:16px; font-weight:480; cursor:pointer; }
+  .account-row strong{ flex:2; font-size:18px; font-weight:540; }
+  #loginBtn{ background:var(--ink); color:var(--canvas); }
+
+  .fav-btn{ position:absolute; top:16px; right:16px; width:44px; height:44px; border:0; border-radius:50%; background:var(--run-top);
+    font-size:20px; line-height:1; color:var(--run-ink); cursor:pointer; }
+  .fav-btn.on{ background:var(--accent); color:#fff; }
+
+  /* 내 취향: 옅은 회색 판 */
+  .taste{ align-self:stretch; background:var(--soft); border-radius:24px; padding:48px; font-size:18px; display:flex; flex-direction:column; }
+  @media (max-width:768px){ .taste{ border-radius:0; padding:32px 24px; } }
+  .taste-head{ font-weight:540; font-size:26px; line-height:1.35; letter-spacing:-.26px; margin-bottom:12px; }
+  .taste-head span{ font-weight:330; font-size:16px; }
+  .taste-gap{ margin-top:32px; }
+  .taste-summary{ margin:0; padding:0; list-style:none; display:grid; gap:8px; }
+  .taste-summary li{ padding:12px 16px; border-radius:8px; background:var(--canvas); font-weight:330; }
+  .taste ol{ margin:0; padding:12px 0 0 20px; display:grid; gap:6px; font-weight:330; }
+  .taste .up{ color:var(--success); font-weight:540; font-variant-numeric:tabular-nums; }
+  .taste .down{ font-weight:540; font-variant-numeric:tabular-nums; }
+  .taste-foot{ font-size:14px; font-weight:330; margin:12px 0 0; }
+  .taste-history{ margin:0; padding:0; list-style:none; }
+  .taste-history li{ padding:12px 0; border-top:1px solid rgba(0,0,0,.1); font-weight:330; }
   #favList li{ cursor:pointer; }
-  #favList li:hover{ border-color:var(--accent); }
-  .taste-gap{ margin-top:14px; }
-  .taste-history{ margin:0; padding:0; list-style:none; display:grid; gap:6px; }
-  .taste-history li{ padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--paper); }
-  .taste-history .stars-s{ color:#F5A623; letter-spacing:1px; }
-  .taste-history small{ display:block; margin-top:2px; color:var(--muted); font-size:11.5px; }
-  .taste-delete{ margin-top:10px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:none;
-    color:#B03030; font:inherit; font-size:12px; cursor:pointer; }
-  .taste-summary{ margin:0 0 8px; padding:0; list-style:none; display:grid; gap:4px; }
-  .taste-summary li{ padding:7px 10px; border-radius:8px; background:var(--accent-soft); }
-  .taste{ margin-top:14px; max-width:600px; font-size:13px; }
-  .taste-head{ font-weight:800; margin-bottom:6px; }
-  .taste-head span{ font-weight:500; color:var(--muted); font-size:12px; }
-  .taste ol{ margin:0; padding-left:18px; display:grid; gap:3px; }
-  .taste .up{ color:#16794A; font-variant-numeric:tabular-nums; }
-  .taste .down{ color:#B03030; font-variant-numeric:tabular-nums; }
-  .taste-foot{ font-size:11.5px; color:var(--muted); margin:6px 0 0; }
+  #favList li:hover{ text-decoration:underline; }
+  .taste-history .stars-s{ letter-spacing:1px; }
+  .taste-history small{ display:block; margin-top:2px; font-size:14px; }
+  .taste-delete{ align-self:flex-start; margin-top:24px; min-height:44px; padding:8px 18px 10px; border:1px solid var(--ink); border-radius:50px; background:none;
+    color:var(--ink); font-size:16px; font-weight:480; cursor:pointer; }
+
   .arrived-badge{
-    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); z-index:1201;
-    background:var(--ink); color:var(--paper); padding:16px 26px; border-radius:14px;
-    font-weight:800; font-size:16px; text-align:center; box-shadow:0 10px 30px -8px rgba(0,0,0,.5);
+    position:absolute; top:50%; left:24px; right:24px; transform:translateY(-50%); z-index:1201;
+    background:var(--accent); color:#fff; padding:28px; border-radius:24px;
+    font-family:var(--num); font-weight:800; font-size:56px; line-height:1; text-align:center;
   }
 
-  .envbar{ font-size:11.5px; color:var(--muted); line-height:1.5; align-self:flex-start; max-width:600px; }
-  .setup-warning{ margin:0 0 18px; padding:14px 16px; border:1px solid #E0A43B; border-left-width:4px;
-    border-radius:8px; background:#FFF8EC; color:#6B4A12; font-size:13px; line-height:1.6; max-width:760px; }
-  .setup-warning strong{ display:block; margin-bottom:4px; font-size:13.5px; }
-  .setup-warning code{ background:rgba(0,0,0,.06); padding:1px 5px; border-radius:4px; font-size:12.5px; }
-  .envbar b{ color:var(--ink); font-family:"IBM Plex Mono",monospace; font-weight:600; }
+  .envbar{ font-size:14px; font-weight:330; line-height:1.45; align-self:flex-start; max-width:640px; }
+  .envbar b{ font-weight:540; }
+  .setup-warning{ margin:0; padding:16px 24px; background:var(--pink); border-radius:8px; font-size:16px; font-weight:330; line-height:1.5; max-width:760px; }
+  .setup-warning strong{ display:block; margin-bottom:4px; font-size:18px; font-weight:540; }
+  .setup-warning code{ font-family:var(--mono); background:var(--canvas); padding:1px 6px; border-radius:2px; font-size:13px; }
 
-  footer{ font-size:11.5px; color:var(--muted); text-align:center; }
+  footer{ font-family:var(--mono); font-size:12px; letter-spacing:.6px; line-height:1.6; padding-top:32px; border-top:1px solid var(--hairline); }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <span class="eyebrow">실시간 백엔드 연동 데모 · POST /recommend</span>
-    <h1>러닝 코스, 지금 바로 안내</h1>
+    <span class="eyebrow">Runmate · 실시간 데모</span>
+    <h1>런메이트</h1>
     <p class="sub">이 페이지는 지금 돌고 있는 실제 FastAPI 서버에 매 요청을 보냅니다. 현위치 근처에 등록된 코스가 있으면 즉시, 없으면 그 자리에서 실제 경로를 새로 만들어 실제 지도 위에 그립니다.</p>
   </header>
   {{KEY_WARNING}}
@@ -255,27 +359,6 @@
       </div>
 
       <div class="field">
-        <div class="row-between"><label>선호 거리</label><span class="val" id="distVal">5.0 km</span></div>
-        <input type="range" id="dist" min="1" max="10" step="0.5" value="5">
-      </div>
-
-      <div class="field">
-        <label>원하는 풍경</label>
-        <div class="chips" id="tagChips" aria-live="polite"></div>
-        <p class="hint" id="tagHint">달리고 싶은 풍경을 골라 보세요. 지금 위치 근처에 있는 것만 보여드려요.</p>
-      </div>
-
-      <div class="field">
-        <label>코스 형태</label>
-        <div class="seg" id="routeSeg">
-          <button data-v="roundtrip" class="on">왕복</button>
-          <button data-v="loop">순환</button>
-          <button data-v="oneway">편도</button>
-        </div>
-        <p class="hint">왕복은 갔던 길을 되짚고, 순환은 한 바퀴 돌아 제자리로 옵니다.</p>
-      </div>
-
-      <div class="field">
         <label for="startInput">출발지</label>
         <div class="locbtns" id="locBtns">
           <button id="myLocBtn" data-mine="1">내 현재 위치 사용 <span class="d" id="myLocNote">· 브라우저 위치 권한 필요</span></button>
@@ -297,27 +380,80 @@
         <p class="hint" id="destNote">비워 두면 조건에 맞는 코스를 추천합니다.</p>
       </div>
 
-      <button class="go" id="goBtn">코스 추천받기</button>
-      <p class="hint">"내 현재 위치 사용"을 누르면 실제 위치로, 세 곳 버튼은 정해 둔 위치로, 검색해서 고르면 그 장소에서 출발합니다. 반경 5km 안에 저장된 코스가 있으면 즉시 매칭되고, 없으면 서버가 그 자리에서 코스를 만듭니다 — 10초 정도 걸립니다.</p>
+      <p class="hint">출발지를 고른 뒤, 오른쪽 폰 화면에서 거리 → 코스 모양 → 풍경 순서로 답하고 "코스 찾기"를 누르세요. 반경 5km 안에 저장된 코스가 있으면 즉시 매칭되고, 없으면 서버가 그 자리에서 코스를 만듭니다 — 10초 정도 걸립니다.</p>
     </div>
 
     <div class="stage">
-      <div class="status" id="status">왼쪽에서 조건을 고르고 "코스 추천받기"를 눌러보세요.</div>
+      <div class="status" id="status">폰 화면에서 질문에 답하고 "코스 찾기"를 눌러보세요.</div>
       <div class="choice" id="choiceBox" hidden></div>
 
       <div class="phone">
         <div class="phone-map">
           <div id="map"></div>
-          <div class="empty-state" id="emptyState">추천받은 코스가 여기 실제 지도 위에 표시됩니다</div>
+          <!-- 시작 화면: 코스를 받기 전(또는 "다시 고르기"를 누르면) 지도를 덮는다 -->
+          <div class="quickstart" id="emptyState">
+            <div class="qs-top">
+              <button class="qs-back" id="qsBack" aria-label="이전 질문" disabled>←</button>
+              <div class="qs-dots" aria-hidden="true"><i class="on"></i><i></i><i></i></div>
+              <span class="qs-place" id="qsPlace">여수 이순신광장</span>
+            </div>
+
+            <section class="qs-step-page" data-step="0" aria-label="거리">
+              <h2 class="qs-q">얼마나<br>달릴까요?</h2>
+              <p class="qs-sub">다이얼을 돌려 정하세요. 실제로 달릴 길로 ±5% 안에 맞춰 드려요.</p>
+              <div class="qs-dial" id="qsDial">
+                <svg viewBox="0 0 260 260" aria-hidden="true">
+                  <g id="dialTicks"></g>
+                  <path class="dial-track" id="dialTrack"/>
+                  <path class="dial-fill" id="dialFill"/>
+                  <circle class="dial-knob" id="dialKnob" r="15" tabindex="0" role="slider" aria-label="달릴 거리"
+                          aria-valuemin="1" aria-valuemax="10" aria-valuenow="5"/>
+                </svg>
+                <div class="qs-dial-center"><span class="qs-number" id="distVal">5.0</span><span class="qs-unit">km</span></div>
+                <div class="qs-dial-steps">
+                  <button class="qs-stepbtn" id="distDown" aria-label="0.5km 줄이기">−</button>
+                  <button class="qs-stepbtn" id="distUp" aria-label="0.5km 늘리기">+</button>
+                </div>
+              </div>
+              <div class="qs-presets" id="qsPresets">
+                <button data-km="3">3km</button>
+                <button data-km="5" class="on">5km</button>
+                <button data-km="7">7km</button>
+                <button data-km="10">10km</button>
+              </div>
+              <input type="range" id="dist" min="1" max="10" step="0.5" value="5" tabindex="-1" aria-hidden="true">
+              <button class="qs-next" data-next>다음</button>
+            </section>
+
+            <section class="qs-step-page" data-step="1" aria-label="코스 짜는 방식" hidden>
+              <h2 class="qs-q">코스는<br>어떻게 짤까요?</h2>
+              <p class="qs-sub">다 달리고 어디로 올지 골라 주세요.</p>
+              <div class="seg" id="routeSeg" role="group" aria-label="코스 형태">
+                <button data-v="roundtrip" class="on"><svg viewBox="0 0 46 46" aria-hidden="true"><path d="M8 30 H34"/><path d="M28 24 L34 30 L28 36"/><path d="M38 16 H12"/><path d="M18 10 L12 16 L18 22"/></svg><span>왕복<small>갔던 길로 되돌아와요</small></span></button>
+                <button data-v="loop"><svg viewBox="0 0 46 46" aria-hidden="true"><path d="M23 8 C34 8 38 16 38 23 C38 32 31 38 23 38 C14 38 8 31 8 23 C8 16 13 10 20 8.5"/><path d="M16 5 L21 8.6 L17 13"/></svg><span>순환<small>한 바퀴 돌아 제자리로 와요</small></span></button>
+                <button data-v="oneway"><svg viewBox="0 0 46 46" aria-hidden="true"><circle cx="9" cy="34" r="3"/><path d="M12 32 C20 26 22 18 30 14 L38 10"/><path d="M31 8 L38 10 L35 17"/></svg><span>편도<small>한 방향으로 쭉 가요</small></span></button>
+              </div>
+              <button class="qs-next" data-next>다음</button>
+            </section>
+
+            <section class="qs-step-page" data-step="2" aria-label="풍경" hidden>
+              <h2 class="qs-q">어디를<br>지나고 싶어요?</h2>
+              <p class="qs-sub">근처에 실제로 있는 풍경만 보여드려요. 안 골라도 돼요.</p>
+              <div class="chips" id="tagChips" aria-live="polite"></div>
+              <p class="hint" id="tagHint">고른 풍경을 지나는 코스를 먼저 찾아요.</p>
+              <p class="qs-summary" id="qsSummary"></p>
+              <button class="go" id="goBtn">코스 찾기</button>
+            </section>
+          </div>
         </div>
 
         <div class="compass-btns" id="compassBtns" hidden>
-          <button id="voiceBtn" title="음성 안내 끄기/켜기">🔊</button>
-          <button id="recenterBtn" title="현위치로 이동">📍</button>
+          <button id="voiceBtn" title="음성 안내 끄기/켜기" aria-label="음성 안내 끄기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/></svg></button>
+          <button id="recenterBtn" title="현위치로 이동" aria-label="현위치로 이동"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
         </div>
 
         <div class="turn-primary" id="turnPrimary" hidden>
-          <span class="mode-badge">🚶 도보</span>
+          <span class="mode-badge">달리기</span>
           <span class="arrow" id="turnArrow">↑</span>
           <div class="meta">
             <div class="dist" id="turnDist">—</div>
@@ -330,28 +466,33 @@
         </div>
 
         <div class="route-sheet" id="routeSheet" hidden>
+          <div class="course-options" id="courseOptions" role="tablist" aria-label="코스 고르기" hidden></div>
           <button class="fav-btn" id="favBtn" title="즐겨찾기" aria-pressed="false">☆</button>
-          <div><span class="name" id="courseName">—</span><span class="region" id="courseRegion"></span></div>
+          <div style="padding-right:56px"><span class="name" id="courseName">—</span><span class="region" id="courseRegion"></span></div>
           <div class="stats">
             <div><div class="n" id="statDist">—</div><div class="l">km</div></div>
             <div><div class="n" id="statSignal">—</div><div class="l">신호등</div></div>
-            <div><div class="n" id="statScore">—</div><div class="l">매칭점수</div></div>
+            <div><div class="n" id="statScore">—</div><div class="l">코스 점수 / 100</div></div>
           </div>
+          <div class="off-target" id="offTarget" hidden></div>
           <div class="note" id="routeNote"></div>
-          <button class="startbtn" id="navBtn">📍 실제 위치로 안내 시작</button>
-          <button class="simbtn" id="simBtn">시뮬레이션으로 미리보기</button>
+          <button class="startbtn" id="navBtn">실제 위치로 안내 시작</button>
+          <div class="sheet-actions">
+            <button class="edit-btn" id="editBtn">다시 고르기</button>
+            <button class="simbtn" id="simBtn">시뮬레이션으로 미리보기</button>
+          </div>
         </div>
 
         <div class="bottom-bar" id="bottomBar" hidden>
-          <button id="restartBtn" title="다시 재생">↻</button>
+          <button id="restartBtn" title="다시 재생" aria-label="다시 재생"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4h4"/></svg></button>
           <div class="center">
             <div class="eta" id="etaTime">—</div>
             <div class="sub" id="etaSub">—</div>
           </div>
-          <button id="exitBtn" title="종료">✕</button>
+          <button id="exitBtn" title="종료" aria-label="안내 종료"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
         </div>
 
-        <div class="arrived-badge" id="arrivedBadge" hidden>🏁 도착!</div>
+        <div class="arrived-badge" id="arrivedBadge" hidden>도착했어요</div>
 
         <div class="rate-card" id="rateCard" hidden>
           <div class="rate-q">이 코스 어땠나요?</div>
@@ -538,15 +679,28 @@ function updateTurnBanner(locatedSteps, distanceSoFarM){
   }
 }
 
-// 현위치 표시: 파란 원 + 위쪽을 가리키는 흰 화살표(실제 내비 앱들의 공통 관례).
+const VOICE_ON_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/></svg>';
+const VOICE_OFF_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>';
+
+// 현위치 표시: 흰 원 + 검정 테두리와 화살표. 검정 코스 선 위에서도 구분된다.
 const RUNNER_ICON_URL = 'data:image/svg+xml,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 26 26" width="26" height="26">' +
-  '<circle cx="13" cy="13" r="11" fill="#1A6FE0" stroke="#ffffff" stroke-width="2.5"/>' +
-  '<path d="M13 6 L18 16 L13 13.3 L8 16 Z" fill="#ffffff"/></svg>'
+  '<circle cx="13" cy="13" r="11" fill="#ffffff" stroke="#000000" stroke-width="2.5"/>' +
+  '<path d="M13 6 L18 16 L13 13.3 L8 16 Z" fill="#000000"/></svg>'
 );
 
 const NAV_PITCH = 62;   // 내비게이션처럼 비스듬히 내려다보는 각도
 const NAV_ZOOM = 17.2;
+
+// 코스를 '보이는 곳'에 맞춰 띄운다. 지도는 회전용으로 폰 화면보다 2.3배 크게 그려 두었고(#map),
+// 아래에는 코스 카드가 덮는다. 그래서 큰 지도의 바깥 여백 + 카드 높이만큼을 비워 두고 맞춘다.
+function visiblePadding(){
+  const map = document.getElementById('map'), screen = document.querySelector('.phone-map');
+  const sx = Math.max(0, (map.offsetWidth - screen.offsetWidth) / 2), sy = Math.max(0, (map.offsetHeight - screen.offsetHeight) / 2);
+  const sheet = document.getElementById('routeSheet');
+  const covered = sheet.hidden ? 0 : sheet.offsetHeight + 8;
+  return { top: Math.round(sy + 40), bottom: Math.round(sy + covered + 24), left: Math.round(sx + 28), right: Math.round(sx + 28) };
+}
 
 function markerEl(url, size){
   const el = document.createElement('div');
@@ -574,26 +728,28 @@ function tmapView(){
   }
   function drawRoute(path){
     routeLines.forEach(l => l.setMap(null));
-    // 경로 아래에 어두운 테두리를 한 겹 깔아야 밝은 지도 위에서도 선이 또렷하게 읽힌다
-    routeLines = [line(path, '#1B4F9C', 11), line(path, '#3E8CFF', 6)];
+    // 세 겹으로 그린다: 어두운 테두리(밝은 땅 위) + 흰 테두리(바다·강·공원 위) + 파랑. 어디서든 묻히지 않는다
+    routeLines = [line(path, '#0b1a4a', 15), line(path, '#ffffff', 11), line(path, '#2f6bff', 6)];
     lastPath = path;
   }
   function fit(path){
     const bounds = new Tmapv3.LatLngBounds(LL(path[0]));
     path.forEach(p => bounds.extend(LL(p)));
-    m.fitBounds(bounds, 46);
+    m.fitBounds(bounds, visiblePadding());
   }
   return {
     draw(path){
       ensure(path[0]);
       when(() => {
+        // 지운 것은 목록에서도 뺀다 — Tmap 지도는 이미 지운 선을 다시 지우면 오류를 낸다(다른 코스를 고를 때)
         [...marks, ...routeLines].forEach(o => o.setMap(null));
+        marks = []; routeLines = [];
         if (planLine){ planLine.setMap(null); planLine = null; }
         m.setBearing(0); m.setPitch(0);
         drawRoute(path);
         const size = new Tmapv3.Size(24, 24);
-        marks = [new Tmapv3.Marker({ position: LL(path[0]), icon: dot('#16794A'), iconSize: size, map: m }),
-                 new Tmapv3.Marker({ position: LL(path[path.length - 1]), icon: dot('#B03030'), iconSize: size, map: m })];
+        marks = [new Tmapv3.Marker({ position: LL(path[0]), icon: dot('#1ea64a'), iconSize: size, map: m }),
+                 new Tmapv3.Marker({ position: LL(path[path.length - 1]), icon: dot('#000000'), iconSize: size, map: m })];
         runner = new Tmapv3.Marker({ position: LL(path[0]), icon: RUNNER_ICON_URL, iconSize: new Tmapv3.Size(26, 26), map: m });
         marks.push(runner);
         fit(path);
@@ -603,7 +759,7 @@ function tmapView(){
     setPlan(path){
       when(() => {
         if (planLine) planLine.setMap(null);
-        planLine = line(path, '#F0A23A', 18, 0.4);
+        planLine = line(path, '#2f6bff', 20, 0.16);
         if (lastPath) drawRoute(lastPath);   // 원래 코스 띠는 Tmap 경로 밑에 깐다
       });
     },
@@ -634,17 +790,20 @@ function maplibreView(){
         center: coords[0], zoom: 15, pitch: 0, bearing: 0,
         attributionControl: { compact: true },
       });
-      new maplibregl.Marker({ color: '#16794A' }).setLngLat(coords[0]).addTo(map);
-      new maplibregl.Marker({ color: '#B03030' }).setLngLat(coords[coords.length-1]).addTo(map);
+      new maplibregl.Marker({ color: '#1ea64a' }).setLngLat(coords[0]).addTo(map);
+      new maplibregl.Marker({ color: '#000000' }).setLngLat(coords[coords.length-1]).addTo(map);
       runnerOverlay = new maplibregl.Marker({ element: markerEl(RUNNER_ICON_URL, 26) }).setLngLat(coords[0]).addTo(map);
       map.on('load', () => {
         map.addSource('route', { type: 'geojson', data: line(path) });
+        map.addLayer({ id: 'route-outline', type: 'line', source: 'route',
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': '#0b1a4a', 'line-width': 15 } });
         map.addLayer({ id: 'route-casing', type: 'line', source: 'route',
           layout: { 'line-cap': 'round', 'line-join': 'round' },
-          paint: { 'line-color': '#1B4F9C', 'line-width': 11, 'line-opacity': 0.9 } });
+          paint: { 'line-color': '#ffffff', 'line-width': 11 } });
         map.addLayer({ id: 'route-line', type: 'line', source: 'route',
           layout: { 'line-cap': 'round', 'line-join': 'round' },
-          paint: { 'line-color': '#3E8CFF', 'line-width': 6 } });
+          paint: { 'line-color': '#2f6bff', 'line-width': 6 } });
         // 3D 건물. OSM에 높이가 있는 건물은 실제 높이로, 없으면 낮은 기본값으로 세운다.
         map.addLayer({
           id: '3d-buildings', source: 'openmaptiles', 'source-layer': 'building',
@@ -657,7 +816,7 @@ function maplibreView(){
           },
         });
         const bounds = coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
-        map.fitBounds(bounds, { padding: 46, duration: 0 });
+        map.fitBounds(bounds, { padding: visiblePadding(), duration: 0 });
       });
     },
     setRoute(path){ if (map) onLoad(() => map.getSource('route').setData(line(path))); },
@@ -667,7 +826,7 @@ function maplibreView(){
         if (map.getSource('plan')) return map.getSource('plan').setData(line(path));
         map.addSource('plan', { type: 'geojson', data: line(path) });
         map.addLayer({ id: 'plan-line', type: 'line', source: 'plan', layout: { 'line-cap': 'round', 'line-join': 'round' },
-                       paint: { 'line-color': '#F0A23A', 'line-width': 18, 'line-opacity': 0.4 } }, 'route-casing');
+                       paint: { 'line-color': '#2f6bff', 'line-width': 20, 'line-opacity': 0.16 } }, 'route-outline');
       });
     },
     runner(lat, lng){ if (runnerOverlay) runnerOverlay.setLngLat([lng, lat]); },
@@ -692,6 +851,7 @@ function fmt(n, d=1){ return Number(n).toFixed(d); }
 
 function showRouteSheet(course, score){
   document.getElementById('routeSheet').hidden = false;
+  document.getElementById('rateCard').hidden = true;   // 도착 뒤 ✕로 나오면 평가 카드가 코스 카드 밑에 깔려 남았다
   document.getElementById('bottomBar').hidden = true;
   document.getElementById('compassBtns').hidden = true;
   document.getElementById('turnPrimary').hidden = true;
@@ -701,13 +861,17 @@ function showRouteSheet(course, score){
   // 코스가 실제로 지나는 풍경을 쉬운 이름으로 같이 보여준다 (예: 여수 · 바다 · 공원)
   document.getElementById('courseRegion').textContent = [course.region, ...(course.scenery_labels || [])].join(' · ');
   document.getElementById('statDist').textContent = fmt(course.distance_km);
+  const off = offTargetText(course);
+  document.getElementById('offTarget').hidden = !off;
+  document.getElementById('offTarget').textContent = off || '';
   document.getElementById('statSignal').textContent = course.traffic_signal_count;
   document.getElementById('statScore').textContent = Math.round(score*100);
 
   const notes = [];
   if (course._source === 'generated') notes.push(`실시간 생성됨 · 다음부터 이 지역은 즉시 매칭`);
   if (course.tmap){
-    const asked = parseFloat(document.getElementById('dist').value);
+    // 풍경까지 늘리기로 했으면 늘린 거리가 기준이다 (경고 문구와 같은 값)
+    const asked = (window._deliver && window._deliver.km) || parseFloat(document.getElementById('dist').value);
     const off = Math.round((course.distance_km - asked) / asked * 100);
     notes.push(`실제로 달릴 경로(Tmap) ${course.distance_km}km · 요청 ${asked}km 대비 ${off >= 0 ? '+' : ''}${off}%`);
   }
@@ -770,7 +934,8 @@ function startNavLoop(course, pace){
   stopNavLoop();
   const path = course.path, cum = cumulativeDistances(path), total = cum[cum.length - 1];
   nav = { path, cum, total, steps: turnAngles(locateStepsOnPath(course.steps, path, cum), path, cum), pace,
-          target: 0, shown: 0, heading: null, last: performance.now(), lastUi: 0, frame: null, done: false };
+          target: 0, shown: 0, heading: null, last: performance.now(), startedAt: performance.now(), lastUi: 0,
+          frame: null, done: false };
   mapView.navStart();
   updateTurnBanner(nav.steps, 0);
   const tick = (now) => {
@@ -787,10 +952,15 @@ function startNavLoop(course, pace){
     if (now - nav.lastUi > UI_EVERY_MS){
       nav.lastUi = now;
       updateTurnBanner(nav.steps, nav.shown);
-      // 시뮬레이션은 끝까지 재생됐을 때, GPS는 경로를 따라 끝점 20m 안까지 왔을 때만 도착이다.
-      // 표시용 위치(shown)는 따라잡는 중이라 늦으므로, 도착은 받은 위치(target)로 판단한다.
+      // 시뮬레이션은 끝까지 재생됐을 때 '미리보기 끝'이다 — 달리지 않았으니 도착이 아니다.
+      // GPS는 경로를 따라 끝점 20m 안까지 왔고, 사람이 그 거리를 달릴 수 있는 시간이 지났을 때만 도착이다
+      // (GPS가 튀어 앞쪽 구간에 잡혀도 도착으로 치지 않게). 표시용 위치(shown)는 늦으므로 받은 위치(target)로 본다.
       const progress = nav.simulate ? nav.shown : nav.target;
-      if (!nav.done && updateEtaAndArrival(progress, total, nav.pace, nav.simulate ? 1 : ARRIVE_GPS_M)){ nav.done = true; nav.onArrive && nav.onArrive(); }
+      const ranLongEnough = nav.simulate || (now - nav.startedAt) / 60000 >= total / 1000 * FASTEST_PACE_MIN_PER_KM;
+      const shown = ranLongEnough ? progress : Math.min(progress, total - ARRIVE_GPS_M - 1);   // 아직이면 끝 직전으로 보여준다
+      if (!nav.done && updateEtaAndArrival(shown, total, nav.pace, nav.simulate ? 1 : ARRIVE_GPS_M, !!nav.simulate)){
+        nav.done = true; nav.onArrive && nav.onArrive();
+      }
     }
     if (!(nav.done && nav.simulate)) nav.frame = requestAnimationFrame(tick);
   };
@@ -817,8 +987,9 @@ function progressOnPath(latlng, path, cum, hint){
 }
 
 const ARRIVE_GPS_M = 20;   // GPS는 오차가 있어 끝점 20m 안이면 도착 (진행 거리는 경로를 따라 온 것만 센다)
+const FASTEST_PACE_MIN_PER_KM = 2.5;   // 사람이 이보다 빨리 달릴 수는 없다 (마라톤 세계 기록 약 2.9분/km)
 
-function updateEtaAndArrival(distanceSoFarM, totalM, paceMinPerKm, arriveWithinM = 5){
+function updateEtaAndArrival(distanceSoFarM, totalM, paceMinPerKm, arriveWithinM = 5, preview = false){
   const remainKm = Math.max(0, (totalM - distanceSoFarM) / 1000);
   document.getElementById('etaTime').textContent = fmtKoreanTime(new Date(Date.now() + remainKm * paceMinPerKm * 60000));
   document.getElementById('etaSub').textContent = `${fmt(remainKm)}km · ${Math.max(0, Math.round(remainKm * paceMinPerKm))}분 남음`;
@@ -826,11 +997,20 @@ function updateEtaAndArrival(distanceSoFarM, totalM, paceMinPerKm, arriveWithinM
   if (distanceSoFarM >= totalM - arriveWithinM){
     document.getElementById('turnPrimary').hidden = true;
     document.getElementById('turnSecondary').hidden = true;
-    document.getElementById('arrivedBadge').hidden = false;
+    const badge = document.getElementById('arrivedBadge');
+    badge.hidden = false;
+    document.getElementById('status').classList.remove('live');
+    if (preview){
+      // 미리보기는 달린 게 아니다: 도착이라고 하지 않고, 평가(학습)도 받지 않는다
+      badge.textContent = '미리보기 끝';
+      speak('미리보기가 끝났습니다.', true);
+      document.getElementById('status').textContent = '미리보기가 끝났습니다. 실제로 달린 뒤 도착하면 코스를 평가할 수 있어요.';
+      return true;
+    }
+    badge.textContent = '도착했어요';
     speak('목적지에 도착했습니다. 수고하셨습니다.', true);
     showRateCard();
     document.getElementById('status').textContent = '도착! 아래에서 코스를 평가하면 다음 추천에 반영됩니다.';
-    document.getElementById('status').classList.remove('live');
     return true;
   }
   return false;
@@ -852,10 +1032,7 @@ function startNavigationSimulated(course){
 // 어디쯤인지 계산해 턴바이턴을 갱신한다 — 네트워크로 부르는 "내비게이션 API"는 따로 없고,
 // 이게 실제 내비 앱들이 자기 안에서 하는 것과 동일한 방식이다.
 function startNavigationGPS(course){
-  if (!navigator.geolocation){
-    document.getElementById('status').textContent = '이 브라우저는 위치 정보를 지원하지 않습니다. 시뮬레이션으로 진행합니다.';
-    return startNavigationSimulated(course);
-  }
+  if (!navigator.geolocation) return gpsUnavailable(course, '이 브라우저는 위치 정보를 지원하지 않아요.');
   enterNavMode();
   simulatedNavigation = false;
   const pathArr = course.path;
@@ -880,24 +1057,26 @@ function startNavigationGPS(course){
         ? `실제 위치 수신 중 · 경로에서 약 ${Math.round(offTrackM)}m 떨어져 있음`
         : '실제 위치로 안내 중';
     },
-    (err) => {
-      document.getElementById('status').textContent = `위치 정보를 가져오지 못했습니다(${err.message}) — 시뮬레이션으로 대신 진행합니다.`;
-      document.getElementById('status').classList.remove('live');
-      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-      watchId = null;
-      startNavigationSimulated(course);
-    },
+    (err) => gpsUnavailable(course, err.code === 1
+      ? '위치 권한이 없어 안내를 시작하지 못했어요. 브라우저 주소창의 위치 설정에서 허용해 주세요.'
+      : `위치를 받지 못해 안내를 시작하지 못했어요(${err.message}).`),
     { enableHighAccuracy: true, maximumAge: 2000, timeout: 12000 },
   );
 
   setTimeout(() => {
-    if (!gotFirstFix && watchId !== null){
-      document.getElementById('status').textContent = '위치 정보 응답이 없어 시뮬레이션으로 대신 진행합니다.';
-      navigator.geolocation.clearWatch(watchId);
-      watchId = null;
-      startNavigationSimulated(course);
-    }
+    if (!gotFirstFix && watchId !== null) gpsUnavailable(course, '12초 동안 위치가 오지 않아 안내를 멈췄어요. 밖에서 다시 시도해 주세요.');
   }, 12000);
+}
+
+// 위치를 못 받으면 안내를 멈추고 코스 카드로 돌아간다. 예전에는 몰래 시뮬레이션으로 바꿔서,
+// 달리지도 않았는데 16초 뒤 "목적지에 도착했습니다"가 나왔다.
+function gpsUnavailable(course, message){
+  if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+  stopNavLoop();
+  showRouteSheet(course, window._currentScore);
+  const status = document.getElementById('status');
+  status.textContent = message + ' 길을 미리 보려면 "시뮬레이션으로 미리보기"를 누르세요.';
+  status.classList.remove('live');
 }
 
 // 사용자가 고른 코스를 Tmap 보행자 경로로 잇는다. 어느 길로 돌지는 우리 모델이 정했고, Tmap은 그 길을
@@ -944,7 +1123,8 @@ document.getElementById('restartBtn').addEventListener('click', () => {
 document.getElementById('recenterBtn').addEventListener('click', recenterOnRunner);
 document.getElementById('voiceBtn').addEventListener('click', (e) => {
   voiceOn = !voiceOn;
-  e.currentTarget.textContent = voiceOn ? '🔊' : '🔇';
+  e.currentTarget.innerHTML = voiceOn ? VOICE_ON_ICON : VOICE_OFF_ICON;
+  e.currentTarget.setAttribute('aria-label', voiceOn ? '음성 안내 끄기' : '음성 안내 켜기');
   if (!voiceOn && window.speechSynthesis) window.speechSynthesis.cancel();
   else speak('음성 안내를 켰습니다', true);
 });
@@ -957,8 +1137,106 @@ document.getElementById('exitBtn').addEventListener('click', () => {
 });
 
 document.getElementById('dist').addEventListener('input', e => {
-  document.getElementById('distVal').textContent = parseFloat(e.target.value).toFixed(1) + ' km';
+  const km = parseFloat(e.target.value);
+  document.getElementById('distVal').textContent = km.toFixed(1);
+  document.querySelectorAll('#qsPresets button').forEach(b => b.classList.toggle('on', +b.dataset.km === km));
+  drawDial();
 });
+
+// ── 거리 다이얼: 왼쪽 아래(1km)에서 시계 방향으로 270° 돌면 오른쪽 아래(10km) ──
+const DIAL = { cx: 130, cy: 130, r: 104, from: 135, sweep: 270, min: 1, max: 10 };
+const dialPoint = (deg, r = DIAL.r) => [DIAL.cx + r * Math.cos(deg * Math.PI / 180), DIAL.cy + r * Math.sin(deg * Math.PI / 180)];
+const dialDeg = km => DIAL.from + (km - DIAL.min) / (DIAL.max - DIAL.min) * DIAL.sweep;
+function dialArc(fromDeg, toDeg){
+  const [x1, y1] = dialPoint(fromDeg), [x2, y2] = dialPoint(toDeg);
+  return `M${x1.toFixed(1)} ${y1.toFixed(1)} A${DIAL.r} ${DIAL.r} 0 ${toDeg - fromDeg > 180 ? 1 : 0} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+}
+document.getElementById('dialTrack').setAttribute('d', dialArc(DIAL.from, DIAL.from + DIAL.sweep));
+(() => {
+  // 눈금: 1km마다, 숫자는 1·3·5·7·10
+  const ns = 'http://www.w3.org/2000/svg', box = document.getElementById('dialTicks');
+  for (let km = DIAL.min; km <= DIAL.max; km++){
+    const deg = dialDeg(km), [x1, y1] = dialPoint(deg, DIAL.r - 18), [x2, y2] = dialPoint(deg, DIAL.r - 26);
+    const tick = document.createElementNS(ns, 'line');
+    tick.setAttribute('class', 'dial-tick' + ([1, 3, 5, 7, 10].includes(km) ? ' major' : ''));
+    [['x1', x1], ['y1', y1], ['x2', x2], ['y2', y2]].forEach(([k, v]) => tick.setAttribute(k, v.toFixed(1)));
+    box.appendChild(tick);
+    if ([1, 3, 5, 7, 10].includes(km)){
+      const [lx, ly] = dialPoint(deg, DIAL.r + 22);
+      const label = document.createElementNS(ns, 'text');
+      label.setAttribute('class', 'dial-label'); label.setAttribute('x', lx.toFixed(1)); label.setAttribute('y', ly.toFixed(1));
+      label.textContent = km;
+      box.appendChild(label);
+    }
+  }
+})();
+function drawDial(){
+  const km = parseFloat(document.getElementById('dist').value), deg = dialDeg(km);
+  document.getElementById('dialFill').setAttribute('d', dialArc(DIAL.from, Math.max(DIAL.from + 0.01, deg)));
+  const [x, y] = dialPoint(deg), knob = document.getElementById('dialKnob');
+  knob.setAttribute('cx', x.toFixed(1)); knob.setAttribute('cy', y.toFixed(1));
+  knob.setAttribute('aria-valuenow', km); knob.setAttribute('aria-valuetext', `${km.toFixed(1)}킬로미터`);
+}
+(() => {
+  const svg = document.querySelector('#qsDial svg');
+  function kmAt(e){
+    const box = svg.getBoundingClientRect();
+    const x = (e.clientX - box.left) / box.width * 260 - DIAL.cx, y = (e.clientY - box.top) / box.height * 260 - DIAL.cy;
+    let rel = ((Math.atan2(y, x) * 180 / Math.PI) - DIAL.from + 720) % 360;
+    if (rel > DIAL.sweep) rel = rel > DIAL.sweep + (360 - DIAL.sweep) / 2 ? 0 : DIAL.sweep;   // 아래 트인 곳은 가까운 끝으로
+    return DIAL.min + rel / DIAL.sweep * (DIAL.max - DIAL.min);
+  }
+  function set(km){
+    const input = document.getElementById('dist');
+    const v = Math.min(DIAL.max, Math.max(DIAL.min, Math.round(km * 2) / 2));
+    if (v !== parseFloat(input.value)){ input.value = v; input.dispatchEvent(new Event('input')); }
+  }
+  svg.addEventListener('pointerdown', e => { svg.setPointerCapture(e.pointerId); set(kmAt(e)); });
+  svg.addEventListener('pointermove', e => { if (svg.hasPointerCapture(e.pointerId)) set(kmAt(e)); });
+  document.getElementById('dialKnob').addEventListener('keydown', e => {
+    const step = { ArrowRight: 0.5, ArrowUp: 0.5, ArrowLeft: -0.5, ArrowDown: -0.5 }[e.key];
+    if (step){ e.preventDefault(); stepDistance(step); }
+  });
+})();
+drawDial();
+
+// ── 시작 화면: 질문 하나씩 ──
+let qsStep = 0;
+function showStep(n){
+  qsStep = Math.max(0, Math.min(2, n));
+  document.querySelectorAll('.qs-step-page').forEach(p => p.hidden = +p.dataset.step !== qsStep);
+  document.querySelectorAll('.qs-dots i').forEach((d, i) => d.classList.toggle('on', i <= qsStep));
+  document.getElementById('qsBack').disabled = qsStep === 0;
+  if (qsStep === 2){
+    const shape = document.querySelector('#routeSeg button.on span').firstChild.textContent;
+    document.getElementById('qsSummary').textContent = `${parseFloat(document.getElementById('dist').value).toFixed(1)}km · ${shape}`;
+  }
+}
+document.querySelectorAll('[data-next]').forEach(b => b.addEventListener('click', () => showStep(qsStep + 1)));
+document.getElementById('qsBack').addEventListener('click', () => showStep(qsStep - 1));
+document.querySelectorAll('#qsPresets button').forEach(b => b.addEventListener('click', () => {
+  const input = document.getElementById('dist');
+  input.value = b.dataset.km;
+  input.dispatchEvent(new Event('input'));
+}));
+// 목표 거리는 크게 보여주고 −/+로 0.5km씩 바꾼다 (슬라이더와 같은 값)
+function stepDistance(delta){
+  const input = document.getElementById('dist');
+  const next = Math.min(+input.max, Math.max(+input.min, parseFloat(input.value) + delta));
+  input.value = next;
+  input.dispatchEvent(new Event('input'));
+}
+document.getElementById('distDown').addEventListener('click', () => stepDistance(-0.5));
+document.getElementById('distUp').addEventListener('click', () => stepDistance(0.5));
+// 코스를 보다가 조건을 바꾸고 싶으면 시작 화면으로 돌아간다
+document.getElementById('editBtn').addEventListener('click', () => {
+  document.getElementById('routeSheet').hidden = true;
+  document.getElementById('choiceBox').hidden = true;
+  document.getElementById('emptyState').hidden = false;
+  showStep(2);   // 마지막 질문(풍경)에서 다시 시작 — 앞 질문은 ← 로 돌아간다
+});
+// 시작 화면 위쪽에 지금 출발지를 보여준다
+function showStartPlace(name){ document.getElementById('qsPlace').textContent = name; }
 // 풍경 선택지는 서버가 내려준다 — 실제로 그 풍경을 지나는 코스가 있는 것만, 붙는 기준과 함께.
 // 화면에 고정해 두면 코스가 없는 풍경도 고를 수 있게 되어 결과 0개가 나온다.
 const DEFAULT_TAG_HINT = document.getElementById('tagHint').textContent;
@@ -1008,6 +1286,7 @@ document.querySelectorAll('#routeSeg button').forEach(b => b.addEventListener('c
 function chooseLocation(button, loc){
   document.querySelectorAll('#locBtns button').forEach(x => x.classList.remove('on'));
   button.classList.add('on');
+  showStartPlace(button.dataset.mine ? '내 위치' : button.firstChild.textContent.trim());
   selectedLoc = loc;
   document.getElementById('startInput').value = '';
   document.getElementById('startNote').textContent = '위 버튼 중 하나를 고르거나, 원하는 출발지를 검색하세요.';
@@ -1089,6 +1368,7 @@ placeSearch(document.getElementById('startInput'), document.getElementById('star
   document.querySelectorAll('#locBtns button').forEach(x => x.classList.remove('on'));
   selectedLoc = { lat: place.lat, lng: place.lng };
   startNote.textContent = `출발지: ${place.name} (${place.address})`;
+  showStartPlace(place.name);
   loadScenery(selectedLoc);   // 그 자리 주변에 실제로 있는 풍경으로 선택지를 다시 받는다
 });
 
@@ -1096,6 +1376,7 @@ document.getElementById('goBtn').addEventListener('click', async () => {
   const goBtn = document.getElementById('goBtn');
   const status = document.getElementById('status');
   goBtn.disabled = true;
+  goBtn.textContent = '찾는 중';
   stopNavLoop();
   status.classList.remove('live');
   status.textContent = '서버에 요청 중… (현위치 근처에 없으면 실시간 생성이라 최대 15초 정도 걸릴 수 있습니다)';
@@ -1115,7 +1396,7 @@ document.getElementById('goBtn').addEventListener('click', async () => {
     current_lat: selectedLoc.lat,
     current_lng: selectedLoc.lng,
     max_distance_km: 5,
-    top_n: 1,
+    top_n: 3,   // 후보를 여럿 받아 러너가 고른다 (1등만 미리 Tmap으로 맞춰져 온다)
     ...(window._choiceSet || {}),   // 앞 응답의 질문에 사용자가 고른 답 (밤에 풍경 길로 갈지, 거리를 늘릴지)
   };
   window._appliedSet = window._choiceSet || {};   // 질문이 이어지면(밤에 강변 → 거리 늘리기) 앞 답도 같이 보낸다
@@ -1140,25 +1421,86 @@ document.getElementById('goBtn').addEventListener('click', async () => {
       goBtn.disabled = false;
       return;
     }
-    const { course, score } = body.results[0];
-    course._source = body.source;
-    window._currentCourse = course;
-    window._currentScore = score;
+    body.results.forEach(r => { r.course._source = body.source; });
+    window._results = body.results;
+    window._deliver = { km: body.deliver_km || payload.preferred_distance_km, routeType };
     window._attribution = body.attribution;
     const sourceLabel = { generated: '실시간 생성 완료', destination: '목적지 경로 생성 완료', db: 'DB 매칭 완료' };
     status.textContent = `${sourceLabel[body.source] || 'DB 매칭 완료'} · ${elapsed}초`;
     if (body.notice) status.textContent += ` · ${body.notice}`;   // 고른 조건대로 못 만들어 대신 준 코스
     showChoice(body.choice);
-    drawCourse(course);
-    if (course.plan_path) mapView.setPlan(course.plan_path);   // 우리 모델이 짠 원래 코스는 주황 띠로 밑에
-    showRouteSheet(course, score);
-    markFavorite(!!body.results[0].favorite);
+    await pickCourse(0);
   } catch(e){
     status.textContent = '서버 연결에 실패했습니다: ' + e.message;
   } finally {
     goBtn.disabled = false;
+    goBtn.textContent = '코스 찾기';
   }
 });
+
+// ── 후보 고르기: 1등은 이미 실제로 달릴 Tmap 경로로 맞춰져 온다. 다른 후보는 고를 때 맞춘다
+//    (전부 미리 맞추면 Tmap 호출이 후보 수만큼 늘어난다). 맞추기 전 거리는 '약'으로 보여준다.
+function renderCourseOptions(){
+  const box = document.getElementById('courseOptions');
+  const results = window._results || [];
+  box.hidden = results.length < 2;
+  box.innerHTML = '';
+  results.forEach((r, i) => {
+    const b = document.createElement('button');
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(i === window._picked));
+    b.className = i === window._picked ? 'on' : '';
+    const exact = !!r.course.tmap;
+    b.innerHTML = `<b>코스 ${i + 1}${offTargetText(r.course) ? ' · 거리 안 맞음' : ''}</b><span>${exact ? '' : '약 '}${fmt(r.course.distance_km)}</span>km`;
+    b.addEventListener('click', () => { if (i !== window._picked) pickCourse(i); });
+    box.appendChild(b);
+  });
+}
+
+// 실제로 달릴 경로(Tmap)의 거리가 요청과 5% 넘게 다르면 그렇다고 말한다. Tmap이 우리 설계 대신 지름길로
+// 이어서 크기를 고쳐도 맞지 않는 코스가 있다(광주 상무 3km 순환 → 2.72km). 다른 후보가 있으면 고르게 한다.
+const DISTANCE_OK = 0.05;
+function offTargetText(course){
+  const target = window._deliver && window._deliver.km;
+  if (!target || !course.tmap) return null;
+  const off = (course.distance_km - target) / target;
+  if (Math.abs(off) <= DISTANCE_OK) return null;
+  const others = (window._results || []).length > 1;
+  return `요청한 ${fmt(target)}km보다 ${Math.round(Math.abs(off) * 100)}% ${off < 0 ? '짧아요' : '길어요'}.`
+    + (others ? ' 위에서 다른 코스를 골라 보세요.' : ' 거리를 바꿔 다시 찾아보세요.');
+}
+
+async function pickCourse(i){
+  const result = window._results[i];
+  window._picked = i;
+  renderCourseOptions();
+  if (!result.course.tmap && !result.course._deliverFailed){
+    const status = document.getElementById('status');
+    const before = status.textContent;
+    status.textContent = `코스 ${i + 1}을(를) 실제로 달릴 길로 맞추는 중…`;
+    document.querySelectorAll('#courseOptions button').forEach(b => b.disabled = true);
+    try {
+      const res = await fetch('/courses/deliver', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ course: result.course, target_km: window._deliver.km, route_type: window._deliver.routeType }) });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+      const { course } = await res.json();
+      result.course = { ...course, _source: result.course._source, scenery_labels: result.course.scenery_labels };
+      status.textContent = before;
+    } catch (e){
+      result.course._deliverFailed = true;
+      status.textContent = '실제 길로 맞추지 못해 설계한 코스를 보여드려요: ' + e.message;
+    }
+    if (window._picked !== i) return;   // 기다리는 사이 다른 코스를 골랐다
+    renderCourseOptions();
+  }
+  const course = result.course;
+  window._currentCourse = course;
+  window._currentScore = result.score;
+  showRouteSheet(course, result.score);   // 카드를 먼저 띄워야 그 높이만큼 비우고 지도를 맞춘다
+  drawCourse(course);
+  if (course.plan_path) mapView.setPlan(course.plan_path);   // 우리 모델이 짠 원래 코스는 옅은 띠로 밑에
+  markFavorite(!!result.favorite);
+}
 
 // 서버가 사용자에게 정하라고 넘긴 것(밤에 인적 드문 풍경 길로 갈지, 거리를 늘려 풍경까지 갈지)을 묻는다.
 // 고른 답(set)을 붙여 같은 조건으로 다시 요청한다. 답이 "지금 코스로"면 그대로 둔다.
@@ -1259,7 +1601,7 @@ function showRateCard(){
   document.getElementById('rateNote').textContent = '평가할수록 다음 추천이 내 취향에 맞춰집니다';
 }
 
-// 항목별 질문은 서버가 내려준다. 별점만으로는 무엇이 좋았는지 알 수 없어서 거리·멈춤·풍경·안심을 따로 묻는다 (오르막은 고도 데이터가 정확해지면 다시 묻는다).
+// 항목별 질문은 서버가 내려준다. 별점만으로는 무엇이 좋았는지 알 수 없어서 거리·멈춤·풍경·차를 따로 묻는다 (오르막은 고도 데이터가 정확해지면 다시 묻는다).
 fetch('/onboarding/feedback').then(r => r.json()).then(({ questions }) => {
   const box = document.getElementById('rateQuestions');
   questions.forEach(q => {

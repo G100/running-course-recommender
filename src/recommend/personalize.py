@@ -5,7 +5,7 @@
 없으니 실제로 뛰고 난 평가에서 배운다.
 
 학습 방식 (지수 경사 가중치 갱신, exponentiated gradient):
-  코스마다 항목별 적합도(거리·풍경·신호등·안전·시간대, 각 0~1)가 있다. 고도는 정확한 데이터가 생기면 켠다.
+  코스마다 항목별 점수(거리·풍경·흐름·차 없는 길, 각 0~1)가 있다. 고도는 정확한 데이터가 생기면 켠다.
   만족도가 높은데 그 코스가 특히 강했던 항목이 있으면 → 그 항목이 이 사람에게 중요하다는 증거.
   만족도가 낮은데 강했던 항목이 있으면 → 그건 이 사람에게 별로 중요하지 않다는 증거.
 
@@ -19,7 +19,7 @@
 어떤 요소를 왜 중시하게 됐는지 설명할 수 있다.
 
 별점 하나로는 "무엇이" 좋았고 나빴는지 알 수 없어서 위 방식은 다른 코스와의 차이로 추정한다.
-그래서 항목별 질문도 받는다(FEEDBACK_QUESTIONS): 거리·오르막·멈춤·풍경·안심. 답은 추정이 아니라
+그래서 항목별 질문도 받는다(FEEDBACK_QUESTIONS): 거리·오르막·멈춤·풍경·차. 답은 추정이 아니라
 그 항목에 대한 직접 증거라, 해당 항목의 가중치만 바로 고친다(learn_aspects). "힘들었다/평탄했다",
 "길었다/짧았다"처럼 방향이 있는 답은 가중치가 아니라 목표값 자체를 옮긴다.
 """
@@ -39,13 +39,14 @@ MAX_WEIGHT = 0.45             # 한 항목이 추천을 독점하지 않게
 RECENT_LIMIT = 30             # 평가를 기다리는 최근 추천 보관 개수
 
 FACTOR_LABELS = {
-    "distance": "원하는 거리에 맞는 코스",
+    "distance": "원하는 거리에 딱 맞는 코스",
     "elevation": "원하는 고도(오르막 정도)에 맞는 코스",
-    "safety": "안전한 코스(CCTV·사람 왕래·치안시설)",
-    "signal_free": "신호등에 덜 걸리는 코스",
-    "tag_match": "고른 풍경(바다뷰·숲길 등)",
-    "time_fit": "지금 시간대에 어울리는 코스",
+    "tag_match": "고른 풍경(바다뷰·숲길 등)을 많이 지나는 코스",
+    "flow": "멈추거나 꺾지 않고 쭉 이어지는 코스",
+    "car_free": "차가 다니지 않는 길(산책로·자전거길)이 많은 코스",
 }
+# 예전 점수 항목 → 지금 항목. 학습된 정도(기본값 대비 배율)를 그대로 옮긴다
+LEGACY_FACTORS = {"signal_free": ("flow", 0.2)}
 
 # 러닝 후 항목별 질문. 앱이 문항을 하드코딩하지 않도록 서버가 내려준다 (GET /onboarding/feedback).
 # 각 답: (값, 보여줄 말, 중요도 변화, 방향)
@@ -57,12 +58,17 @@ ALL_FEEDBACK_QUESTIONS = [
         ("short", "짧았어요", 1.0, +1), ("good", "딱 좋았어요", 0.0, 0), ("long", "길었어요", 1.0, -1)]},
     {"key": "elevation", "factor": "elevation", "question": "오르막은 어땠나요?", "options": [
         ("flat", "너무 평탄했어요", 1.0, +1), ("good", "적당했어요", 0.0, 0), ("hard", "힘들었어요", 1.0, -1)]},
-    {"key": "stops", "factor": "signal_free", "question": "신호등이나 횡단보도에서 자주 멈췄나요?", "options": [
+    {"key": "stops", "factor": "flow", "question": "신호등이나 횡단보도에서 자주 멈췄나요?", "options": [
         ("few", "거의 안 멈췄어요", 0.5, 0), ("ok", "보통이었어요", -0.25, 0), ("many", "자주 멈췄어요", 1.0, 0)]},
     {"key": "scenery", "factor": "tag_match", "question": "풍경은 어땠나요?", "options": [
         ("good", "좋았어요", 0.5, 0), ("ok", "보통이었어요", -0.25, 0), ("bad", "별로였어요", 1.0, 0)]},
-    {"key": "safety", "factor": "safety", "question": "달리는 동안 안심됐나요?", "options": [
-        ("safe", "안심됐어요", 0.5, 0), ("ok", "보통이었어요", -0.25, 0), ("unsafe", "불안했어요", 1.0, 0)]},
+    {"key": "cars", "factor": "car_free", "question": "달리면서 차가 신경 쓰였나요?", "options": [
+        ("few", "거의 안 쓰였어요", 0.5, 0), ("some", "가끔 쓰였어요", -0.25, 0), ("often", "자주 쓰였어요", 1.0, 0)]},
+]
+# 더는 묻지 않는 문항. 예전 평가 이력을 읽을 수 있게만 남긴다
+RETIRED_FEEDBACK_QUESTIONS = [
+    {"key": "safety", "factor": None, "question": "달리는 동안 안심됐나요?", "options": [
+        ("safe", "안심됐어요", 0, 0), ("ok", "보통이었어요", 0, 0), ("unsafe", "불안했어요", 0, 0)]},
 ]
 # 고도가 꺼져 있으면 오르막은 묻지 않는다 (잴 수 없는 걸 물어 학습하면 엉뚱한 걸 배운다)
 FEEDBACK_QUESTIONS = [q for q in ALL_FEEDBACK_QUESTIONS if ELEVATION_ENABLED or q["key"] != "elevation"]
@@ -125,7 +131,8 @@ def answers_view(profile: dict) -> list:
 def answer_labels(aspects: dict) -> list:
     """{"stops": "many"} → ["자주 멈췄어요"] (이력을 사람이 읽을 수 있게)."""
     # 예전에 답한 오르막 같은, 지금은 묻지 않는 문항의 답도 이력에서는 읽을 수 있게 전체 문항으로 본다
-    labels = {q["key"]: {value: label for value, label, _, _ in q["options"]} for q in ALL_FEEDBACK_QUESTIONS}
+    labels = {q["key"]: {value: label for value, label, _, _ in q["options"]}
+              for q in ALL_FEEDBACK_QUESTIONS + RETIRED_FEEDBACK_QUESTIONS}
     return [labels[key][value] for key, value in (aspects or {}).items() if value in labels.get(key, {})]
 
 
@@ -138,15 +145,17 @@ def taste_summary(profile: dict) -> list:
 
     lines = []
     if said("stops", "many"):
-        lines.append(f"신호등에 자주 멈추는 걸 불편해하세요 ({said('stops', 'many')}번 말씀하셨어요). 덜 멈추는 코스를 먼저 추천해요.")
+        lines.append(f"신호등에 자주 멈추는 걸 불편해하세요 ({said('stops', 'many')}번 말씀하셨어요). 덜 멈추고 쭉 이어지는 코스를 먼저 추천해요.")
     elif said("stops", "few") >= 2:
         lines.append("멈추지 않고 달리는 코스에 만족하세요.")
     if said("scenery", "bad"):
         lines.append(f"풍경이 별로면 아쉬워하세요 ({said('scenery', 'bad')}번). 고른 풍경을 더 많이 지나는 코스를 먼저 추천해요.")
     elif said("scenery", "good") >= 2:
         lines.append("풍경 좋은 코스를 좋아하세요.")
-    if said("safety", "unsafe"):
-        lines.append(f"불안하게 느낀 코스가 있었어요 ({said('safety', 'unsafe')}번). 사람 왕래가 있고 밝은 길을 먼저 추천해요.")
+    if said("cars", "often"):
+        lines.append(f"달리면서 차가 자주 신경 쓰이셨어요 ({said('cars', 'often')}번). 차가 다니지 않는 길이 많은 코스를 먼저 추천해요.")
+    elif said("cars", "few") >= 2:
+        lines.append("차 걱정 없이 달린 코스에 만족하세요.")
     elevation = profile.get("elevation_scale", 1.0) if ELEVATION_ENABLED else 1.0
     if elevation <= 0.9:
         lines.append(f"오르막을 힘들어하셔서 고른 것보다 {round((1 - elevation) * 100)}% 완만한 코스를 찾아요.")
@@ -239,9 +248,13 @@ def weights_for(profile: dict) -> dict:
 
 
 def _only_active(weights: dict) -> dict:
-    """지금 쓰는 항목의 가중치만 남겨 합을 1로 맞춘다. 예전 프로필에는 날씨·고도 가중치가 있다.
-    새로 생긴 항목(고도를 다시 켜면)은 기본값으로 채운다."""
+    """지금 쓰는 항목의 가중치만 남겨 합을 1로 맞춘다. 예전 프로필에는 날씨·안전·시간대 가중치가 있다.
+    이름이 바뀐 항목(신호등 → 흐름)은 학습된 배율을 옮기고, 새로 생긴 항목은 기본값으로 채운다."""
     base = default_weights()
+    weights = dict(weights)
+    for old, (new, old_default) in LEGACY_FACTORS.items():
+        if old in weights and new not in weights and new in base:
+            weights[new] = weights[old] / old_default * base[new]
     kept = {k: weights.get(k, base[k]) for k in base}
     total = sum(kept.values()) or 1.0
     return {k: v / total for k, v in kept.items()}
