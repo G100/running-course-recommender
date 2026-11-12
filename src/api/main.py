@@ -27,7 +27,7 @@ from ..data_collection.scenery import THRESHOLDS as SCENERY_THRESHOLDS, tag_desc
 from ..api_clients.tmap_poi import search_places
 from ..recommend.destination import course_to_destination
 from ..recommend.freshness import stale_courses, stamp_verified
-from ..recommend.generate_live import area_reach_m, generate_loop_candidates, generate_loop_course
+from ..recommend.generate_live import CHOICE_OK, area_reach_m, generate_loop_candidates, generate_loop_course
 from ..recommend.location import filter_nearby
 from ..recommend.profile import resolve_target_distance_km
 from ..data_collection.enrich import haversine_m
@@ -41,7 +41,7 @@ from ..recommend.score import component_scores, filter_by_required_tags, recomme
 from ..recommend.trim import truncate_course
 from ..recommend.step_position import assign_positions
 from ..data_collection import course_file, local_osm
-from ..recommend import auth, nearby_scenery, scenery_choices, tmap_follow, user_store
+from ..recommend import auth, laps, nearby_scenery, reroute, scenery_choices, tmap_follow, user_store
 from ..data_collection import area_cache
 from ..api_clients.tmap_pedestrian import extract_path, extract_steps
 from ..recommend.timeofday import current_period
@@ -570,8 +570,10 @@ def deliver_course(req: DeliverRequest):
         raise HTTPException(status_code=400, detail="코스에 경로(path)가 없습니다.")
     if course.get("tmap"):
         return {"course": course}
-    regenerate = _regenerate_like(course) or (lambda km: None)
-    return {"course": _deliver_on_tmap(course, req.target_km, req.route_type, regenerate)}
+    count = course.get("laps") or 1
+    lap = laps.one_lap(course)   # 여러 바퀴면 한 바퀴만 Tmap으로 잇고 다시 이어 붙인다
+    regenerate = _regenerate_like(lap) or (lambda km: None)
+    return {"course": laps.repeat(_deliver_on_tmap(lap, req.target_km / count, req.route_type, regenerate), count)}
 
 
 @app.post("/courses/follow")
@@ -584,6 +586,22 @@ def follow_course(req: FollowRequest):
     path, _ = extract_path(route)
     follow = route["follow"]
     return {"path": path, "steps": extract_steps(route), "distance_km": follow["distance_km"], "follow": follow}
+
+
+class RerouteRequest(BaseModel):
+    position: List[float] = Field(min_length=2, max_length=2)   # 지금 위치 [lat, lng]
+    path: List[List[float]] = Field(min_length=2)               # 안내 중인 경로 [[lat, lng], ...]
+    steps: List[dict] = []                                      # 안내 중인 회전 안내 (남은 것만 새 경로에 이어 붙인다)
+    progress_m: float = Field(ge=0)                             # 경로를 따라 지금까지 온 거리
+
+
+@app.post("/courses/reroute")
+def reroute_course(req: RerouteRequest):
+    """달리다 코스를 벗어난 러너에게 원래 코스로 돌아가는 길을 준다 (아직 안 달린 코스 중 가장 가까운 곳으로)."""
+    try:
+        return reroute.back_to_course(req.position, [list(p) for p in req.path], req.steps, req.progress_m)
+    except (RuntimeError, ValueError, requests.RequestException) as error:
+        raise HTTPException(status_code=502, detail=f"Tmap으로 돌아가는 길을 받지 못했습니다: {error}")
 
 
 @app.get("/health")
@@ -774,6 +792,7 @@ def _recommend(req: RecommendRequest, background_tasks: BackgroundTasks, user: d
     deliver_km = generate_km   # 실제로 달릴 경로를 맞출 거리 (풍경까지 늘리기로 했으면 늘린 거리)
     notice = choice = None
     plain = False   # 고른 풍경 없이 만든 코스인가
+    lap_count = 1   # 한 바퀴로 못 만들어 짧은 순환을 여러 바퀴 도는가
     try:
         # 밤에는 상가·큰길처럼 사람이 있는 길 쪽으로 경로를 짠다 (시간대는 요청값, 없으면 서버 시각).
         # 사용자가 위험을 알고도 풍경 길을 골랐으면 그렇게 하지 않는다.
@@ -782,7 +801,10 @@ def _recommend(req: RecommendRequest, background_tasks: BackgroundTasks, user: d
         generate = lambda km, wanted: generate_loop_candidates(
             req.current_lat, req.current_lng, km, wanted, route_type=req.route_type, night=route_night)
         try:
-            generated_candidates = generate(generate_km, tags)
+            if req.route_type == "loop":
+                generated_candidates, lap_count = _loop_or_laps(generate, generate_km, tags)
+            else:
+                generated_candidates = generate(generate_km, tags)
         except ValueError:
             if not tags:
                 raise
@@ -794,7 +816,11 @@ def _recommend(req: RecommendRequest, background_tasks: BackgroundTasks, user: d
                 notice = f"{_wanted_label(tags)}까지 가려고 요청보다 {longer_km - generate_km:.1f}km 길게 만들었어요."
         if generated_candidates is None:
             # 코스는 반드시 준다 — 풍경 없이라도. 늘릴지는 사용자가 정한다
-            generated_candidates, plain = generate(generate_km, set()), True
+            if req.route_type == "loop":
+                generated_candidates, lap_count = _loop_or_laps(generate, generate_km, set())
+            else:
+                generated_candidates = generate(generate_km, set())
+            plain = True
             label = _wanted_label(tags)
             if req.extend_for_scenery:
                 notice = f"거리를 늘려도 {label}까지 인도로만 갈 수 있는 코스를 찾지 못해, 풍경 없이 만든 코스예요."
@@ -854,6 +880,9 @@ def _recommend(req: RecommendRequest, background_tasks: BackgroundTasks, user: d
             apply_route_type(attach_actual_return_path(c) if req.route_type == "roundtrip" else c, req.route_type)
             for c in generated_candidates
         ]
+    if lap_count > 1:
+        # 후보는 한 바퀴짜리다 — 한 바퀴 거리로 점수를 매긴다
+        user = dict(user, preferred_distance_km=generate_km / lap_count, preferred_time_min=None)
     ranked = recommend(
         generated_candidates,
         dict(user, environment_tags=[]) if plain else user,
@@ -903,7 +932,20 @@ def _recommend(req: RecommendRequest, background_tasks: BackgroundTasks, user: d
         return best[0][0] if best else (made[0] if made else None)
 
     # 1등 코스는 실제로 달릴 Tmap 경로로 바꿔 준다 — 화면에 보이는 거리가 곧 실제로 달릴 거리다
-    results[0]["course"] = _deliver_on_tmap(results[0]["course"], deliver_km, req.route_type, resize)
+    # 여러 바퀴면 한 바퀴만 잇고 바퀴 수만큼 이어 붙인다 (다른 후보도 바퀴 수만큼 이어 붙여 전체 거리로 보여 준다)
+    results[0]["course"] = _deliver_on_tmap(results[0]["course"], deliver_km / lap_count, req.route_type, resize)
+    if lap_count > 1:
+        for result in results:
+            result["course"] = laps.repeat(result["course"], lap_count)
+        lap_km = results[0]["course"]["lap_km"]
+        lap_notice = (f"한 바퀴로는 {generate_km:g}km 순환을 만들지 못해, {lap_km:.1f}km를 {lap_count}바퀴 도는 코스예요. "
+                      "같은 길을 반복해서 달려요.")
+        notice = lap_notice + (f" {notice}" if notice else "")
+        if choice is None:
+            choice = {"question": f"{lap_km:.1f}km를 {lap_count}바퀴 돌아요. 이대로 달릴까요?",
+                      "options": [{"label": f"이대로 {lap_count}바퀴", "set": {}},
+                                  {"label": "왕복으로", "set": {"route_type": "roundtrip"}},
+                                  {"label": "편도로", "set": {"route_type": "oneway"}}]}
     return {
         "results": results,
         "source": "generated",
@@ -921,6 +963,33 @@ def _distance_fits(course: dict, target_km, route_type: str) -> bool:
     if route_type == "loop":
         return abs(km - target_km) <= target_km * DISTANCE_OK
     return km >= target_km * (1 - DISTANCE_OK)
+
+
+LAP_COUNTS = (2, 3, 4, 5, 6)   # 한 바퀴로 안 되면 이 순서로 바퀴 수를 늘려 본다 (같은 길 반복은 적을수록 좋다)
+
+
+def _loop_or_laps(generate, km: float, tags) -> tuple:
+    """(후보, 바퀴 수). 한 바퀴로 요청 거리의 순환을 만들면 그것을, 못 만들면 짧은 순환을 여러 바퀴.
+
+    '못 만들었다'는 생성이 실패했거나 요청 ±10% 안의 후보가 하나도 없는 것이다. 바퀴 수를 늘려도 안 되면
+    한 바퀴로 만든 것을 그대로 준다(그것도 없으면 생성 실패 이유를 그대로 올린다)."""
+    try:
+        single = generate(km, tags)
+    except ValueError as error:
+        single, failure = None, error
+    fits = lambda made, target: [c for c in made if abs(c["distance_km"] - target) <= target * CHOICE_OK]
+    if single and fits(single, km):
+        return single, 1
+    for count in LAP_COUNTS:
+        try:
+            made = generate(km / count, tags)
+        except ValueError:
+            continue
+        if fits(made, km / count):
+            return fits(made, km / count), count
+    if single:
+        return single, 1
+    raise failure
 
 
 SCENERY_EXTEND = (1.4, 1.8, 2.3, 3.0)   # 풍경까지 닿을 때까지 요청 거리의 이 배수로 늘려 본다

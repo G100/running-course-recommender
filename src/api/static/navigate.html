@@ -138,7 +138,7 @@
   .qs-next:active{ transform:scale(.98); }
   .qs-summary{ margin:0 0 10px; font-size:13px; color:var(--run-mute); text-align:center; }
 
-  /* ① 거리: 다이얼. 시계 방향으로 돌리면 1km → 10km (0.5km씩). 아래 트인 곳에 −/+ */
+  /* ① 거리: 다이얼. 시계 방향으로 돌리면 1km → 42.195km (10km까지는 0.5km씩, 그 위는 1km씩). 아래 트인 곳에 −/+ */
   .qs-dial{ position:relative; width:250px; max-width:100%; aspect-ratio:1; margin:4px auto 0; touch-action:none; user-select:none; }
   .qs-dial svg{ position:absolute; inset:0; width:100%; height:100%; overflow:visible; cursor:grab; }
   .qs-dial svg:active{ cursor:grabbing; }
@@ -407,21 +407,22 @@
                   <path class="dial-track" id="dialTrack"/>
                   <path class="dial-fill" id="dialFill"/>
                   <circle class="dial-knob" id="dialKnob" r="15" tabindex="0" role="slider" aria-label="달릴 거리"
-                          aria-valuemin="1" aria-valuemax="10" aria-valuenow="5"/>
+                          aria-valuemin="1" aria-valuemax="42.195" aria-valuenow="5"/>
                 </svg>
                 <div class="qs-dial-center"><span class="qs-number" id="distVal">5.0</span><span class="qs-unit">km</span></div>
                 <div class="qs-dial-steps">
-                  <button class="qs-stepbtn" id="distDown" aria-label="0.5km 줄이기">−</button>
-                  <button class="qs-stepbtn" id="distUp" aria-label="0.5km 늘리기">+</button>
+                  <button class="qs-stepbtn" id="distDown" aria-label="거리 줄이기">−</button>
+                  <button class="qs-stepbtn" id="distUp" aria-label="거리 늘리기">+</button>
                 </div>
               </div>
               <div class="qs-presets" id="qsPresets">
-                <button data-km="3">3km</button>
                 <button data-km="5" class="on">5km</button>
-                <button data-km="7">7km</button>
                 <button data-km="10">10km</button>
+                <button data-km="21.1">하프</button>
+                <button data-km="42.195">풀코스</button>
               </div>
-              <input type="range" id="dist" min="1" max="10" step="0.5" value="5" tabindex="-1" aria-hidden="true">
+              <!-- step="any": 하프(21.1)·풀코스(42.195)처럼 정해진 간격에 없는 거리도 그대로 담는다 -->
+              <input type="range" id="dist" min="1" max="42.195" step="any" value="5" tabindex="-1" aria-hidden="true">
               <button class="qs-next" data-next>다음</button>
             </section>
 
@@ -625,6 +626,7 @@ function fmtKoreanTime(d){
 // 달리는 중에는 화면을 볼 수 없다. 음성이 없으면 안내가 있어도 못 듣는 것과 같다.
 // 브라우저 내장 음성합성이라 키도 외부 요청도 필요 없다.
 let voiceOn = true, spokenKey = null, simulatedNavigation = false;
+const LAP_TURN = 300;   // 여러 바퀴 코스에서 바퀴가 바뀌는 안내 (서버 laps.py와 같은 번호)
 
 function speak(text, interrupt=false){
   if (!voiceOn || !window.speechSynthesis) return;
@@ -642,10 +644,19 @@ function announce(step, remainingM){
     ? (remainingM <= 180 ? 'soon' : null)
     : (remainingM <= 30 ? 'now' : (remainingM <= 180 ? 'soon' : null));
   if (!stage) return;
+  const say = step.instruction || step.description;
+  if (step.turn_type === LAP_TURN){
+    // 바퀴가 바뀌는 건 미리 알릴 일이 아니다 — 지나갈 때 한 번만, 거리 없이 ("1바퀴 끝, 2바퀴째입니다")
+    if (!simulatedNavigation && stage !== 'now') return;
+    const key = `${step.cum_m ?? step.cumDistance}|lap`;
+    if (key === spokenKey) return;
+    spokenKey = key;
+    speak(say);
+    return;
+  }
   const key = `${step.cum_m ?? step.cumDistance}|${stage}`;
   if (key === spokenKey) return;
   spokenKey = key;
-  const say = step.instruction || step.description;
   speak(stage === 'now' ? say : `${fmtDist(remainingM)} 앞에서 ${say}`);
 }
 
@@ -890,7 +901,33 @@ function showRouteSheet(course, score){
 
 // GPS 좌표가 경로 위 어디쯤인지(누적거리, 경로 이탈거리) 찾는다 — 턴바이턴 매칭 로직은
 // 시뮬레이션과 실제 GPS 모드가 완전히 동일하게 쓴다. 다른 건 "위치를 어디서 받아오느냐"뿐이다.
+// ── 안내하는 동안 화면을 켜 둔다 ──
+// 웹 페이지는 화면이 꺼지면 멈춘다 — 위치도 안 들어오고 음성도 안 나온다. 그래서 실제 위치로 안내하는 동안은
+// 화면이 저절로 꺼지지 않게 한다(Screen Wake Lock: 안드로이드 크롬 지원, HTTPS나 localhost에서만).
+// 다른 앱에 갔다 오면 브라우저가 이 잠금을 풀어 버리므로, 돌아왔을 때 안내 중이면 다시 건다.
+let screenLock = null, keepScreenOn = false;
+async function holdScreen(on){
+  keepScreenOn = on;
+  if (!on){
+    if (screenLock){ screenLock.release().catch(() => {}); screenLock = null; }
+    return;
+  }
+  if (!('wakeLock' in navigator) || screenLock || document.visibilityState !== 'visible') return;
+  try {
+    const lock = await navigator.wakeLock.request('screen');
+    if (!keepScreenOn || screenLock){ lock.release().catch(() => {}); return; }   // 그사이 안내가 끝났거나 이미 걸었다
+    screenLock = lock;
+    lock.addEventListener('release', () => { if (screenLock === lock) screenLock = null; });
+  } catch (e){
+    // 배터리 절약 모드 등에서는 거절된다 — 화면이 꺼질 수 있을 뿐 안내는 그대로 한다
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (keepScreenOn && document.visibilityState === 'visible') holdScreen(true);
+});
+
 function enterNavMode(){
+  holdScreen(false);
   document.getElementById('rateCard').hidden = true;
   stopNavLoop();
   if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
@@ -1039,17 +1076,78 @@ function startNavigationSimulated(course){
 // 진짜 내비게이션: 브라우저 Geolocation API로 실제 기기 위치를 계속 받아서, 그 위치가 경로 위
 // 어디쯤인지 계산해 턴바이턴을 갱신한다 — 네트워크로 부르는 "내비게이션 API"는 따로 없고,
 // 이게 실제 내비 앱들이 자기 안에서 하는 것과 동일한 방식이다.
+// ── 코스를 벗어났을 때 ──
+// 경로에서 OFF_COURSE_M 넘게 떨어진 채로 OFF_COURSE_HOLD_MS가 지나면 벗어난 것으로 보고, 원래 코스로
+// 돌아가는 길을 서버에서 받아 그 길로 안내한다. 잠깐만 떨어진 건 GPS가 튄 것이라 거른다.
+const OFF_COURSE_M = 40;
+const OFF_COURSE_HOLD_MS = 8000;
+const REROUTE_RETRY_MS = 30000;     // 새 길을 못 찾았으면 이만큼 뒤에 다시 찾는다
+const SAY_CHANGE_FROM_M = 50;       // 전체 거리가 이보다 적게 달라지면 따로 말하지 않는다
+
+// 재탐색으로 전체 거리가 얼마나 달라지는지: 음성용("약 300미터 늘어납니다")과 화면용("약 300m 늘어남")
+function distanceChange(extraM){
+  const m = Math.abs(extraM);
+  if (m < SAY_CHANGE_FROM_M) return { say: '', show: '' };
+  const spoken = m >= 1000 ? `${(m / 1000).toFixed(1)}킬로미터` : `${Math.round(m / 10) * 10}미터`;
+  return { say: ` 전체 거리가 약 ${spoken} ${extraM > 0 ? '늘어납니다' : '줄어듭니다'}.`,
+           show: ` · 전체 거리 약 ${fmtDist(Math.round(m / 10) * 10)} ${extraM > 0 ? '늘어남' : '줄어듦'}` };
+}
+
 function startNavigationGPS(course){
   if (!navigator.geolocation) return gpsUnavailable(course, '이 브라우저는 위치 정보를 지원하지 않아요.');
   enterNavMode();
   simulatedNavigation = false;
-  const pathArr = course.path;
-  const cum = cumulativeDistances(pathArr);
-  const run = startNavLoop(course, PACE_MIN_PER_KM);
-  run.onArrive = () => { if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; } };
+  holdScreen(true);
+  let pathArr = course.path;
+  let cum = cumulativeDistances(pathArr);
+  let run = startNavLoop(course, PACE_MIN_PER_KM);
+  const stopWatching = () => {
+    if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+    holdScreen(false);   // 도착했다 — 화면을 더 붙잡아 둘 이유가 없다
+  };
+  run.onArrive = stopWatching;
 
-  document.getElementById('status').textContent = '실제 GPS 위치를 기다리는 중… (위치 권한을 허용해주세요)';
-  document.getElementById('status').classList.add('live');
+  const status = document.getElementById('status');
+  status.textContent = '실제 GPS 위치를 기다리는 중… (위치 권한을 허용해주세요)';
+  status.classList.add('live');
+
+  // since: 벗어나기 시작한 시각, busy: 새 길을 받는 중, retryAt: 다시 찾아도 되는 시각, toldFailure: 못 찾았다고 이미 말함
+  const off = { since: null, busy: false, retryAt: 0, toldFailure: false, note: '' };
+  async function reroute(lat, lng){
+    off.busy = true;
+    const asked = run;   // 응답이 왔을 때 이 안내가 아직 그대로인지 본다 (그사이 끄거나 도착했을 수 있다)
+    // 못 찾아서 다시 찾는 중에는 같은 말을 되풀이하지 않는다
+    if (!off.toldFailure) speak('코스를 벗어났습니다. 경로를 재탐색합니다.', true);
+    try {
+      const steps = run.steps.map(s => ({ lat: s.lat, lng: s.lng, description: s.description, turn_type: s.turn_type,
+                                          instruction: s.instruction, cum_m: s.cumDistance }));
+      const res = await fetch('/courses/reroute', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position: [lat, lng], path: pathArr, steps, progress_m: run.target }) });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+      const body = await res.json();
+      if (nav !== asked || asked.done) return;
+      if (off.since === null) return;   // 그사이 스스로 코스로 돌아왔다 — 원래 안내를 계속한다
+      course.path = body.path; course.steps = body.steps;
+      pathArr = course.path; cum = cumulativeDistances(pathArr);
+      mapView.setRoute(course.path);
+      run = startNavLoop(course, asked.pace);
+      run.onArrive = stopWatching;
+      spokenKey = null;
+      off.since = null; off.toldFailure = false; off.retryAt = 0;
+      const change = distanceChange(body.extra_m);
+      off.note = ' · 코스로 돌아가는 길' + change.show;
+      speak('새 경로로 안내합니다.' + change.say, true);
+    } catch (e){
+      if (nav !== asked) return;
+      off.retryAt = Date.now() + REROUTE_RETRY_MS;
+      if (off.since !== null && !off.toldFailure){
+        off.toldFailure = true;
+        speak('경로를 찾지 못했습니다. 원래 코스로 돌아가 주세요.', true);
+      }
+    } finally {
+      off.busy = false;
+    }
+  }
 
   let gotFirstFix = false;
   watchId = navigator.geolocation.watchPosition(
@@ -1058,12 +1156,21 @@ function startNavigationGPS(course){
       const { cumDistance, offTrackM } = progressOnPath([lat, lng], pathArr, cum, run.target);
       run.pace = speed && speed > 0.2 ? (1000 / speed) / 60 : PACE_MIN_PER_KM; // 실측 속도가 있으면 그걸로 ETA 계산
       // 경로에서 멀리 벗어난 위치로는 진행 거리를 옮기지 않는다 (엉뚱한 구간으로 건너뛰지 않게)
-      if (offTrackM <= 40) run.target = Math.max(run.target, cumDistance);
+      if (offTrackM <= OFF_COURSE_M) run.target = Math.max(run.target, cumDistance);
       if (!gotFirstFix) run.shown = cumDistance;   // 첫 위치는 바로 그 자리에서 시작
       gotFirstFix = true;
-      document.getElementById('status').textContent = offTrackM > 40
-        ? `실제 위치 수신 중 · 경로에서 약 ${Math.round(offTrackM)}m 떨어져 있음`
-        : '실제 위치로 안내 중';
+      const now = Date.now();
+      if (offTrackM > OFF_COURSE_M){
+        if (off.since === null) off.since = now;
+        if (!off.busy && !run.done && now - off.since >= OFF_COURSE_HOLD_MS && now >= off.retryAt) reroute(lat, lng);
+      } else {
+        off.since = null; off.toldFailure = false; off.retryAt = 0;
+      }
+      status.textContent = offTrackM > OFF_COURSE_M
+        ? (off.busy ? '코스를 벗어났어요 · 돌아가는 길을 찾는 중'
+           : off.toldFailure ? `돌아가는 길을 찾지 못했어요 · 경로에서 약 ${Math.round(offTrackM)}m · 곧 다시 찾아요`
+           : `실제 위치 수신 중 · 경로에서 약 ${Math.round(offTrackM)}m 떨어져 있음`)
+        : '실제 위치로 안내 중' + off.note;
     },
     (err) => {
       // 달리는 중에 신호를 잠깐 잃는 건 흔하다(다리 밑·건물 사이). 이미 위치를 받고 있었다면 안내를 끄지 않고
@@ -1088,6 +1195,7 @@ function startNavigationGPS(course){
 // 달리지도 않았는데 16초 뒤 "목적지에 도착했습니다"가 나왔다.
 function gpsUnavailable(course, message){
   if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+  holdScreen(false);
   stopNavLoop();
   showRouteSheet(course, window._currentScore);
   const status = document.getElementById('status');
@@ -1145,6 +1253,7 @@ document.getElementById('voiceBtn').addEventListener('click', (e) => {
   else speak('음성 안내를 켰습니다', true);
 });
 document.getElementById('exitBtn').addEventListener('click', () => {
+  holdScreen(false);
   stopNavLoop();
   if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
   if (window._currentCourse) showRouteSheet(window._currentCourse, window._currentScore);
@@ -1152,36 +1261,55 @@ document.getElementById('exitBtn').addEventListener('click', () => {
   document.getElementById('status').classList.remove('live');
 });
 
+// 다이얼 가운데에는 숫자를 크게 쓴다. 하프·풀코스는 이름을 같이 쓴다 (42.195는 다이얼 안에 다 들어가지 않는다)
+const RACE_NAMES = { 21.1: '하프', 42.195: '풀코스' };
+const distLabel = km => km === 42.195 ? '42.195' : km.toFixed(1);
 document.getElementById('dist').addEventListener('input', e => {
   const km = parseFloat(e.target.value);
   document.getElementById('distVal').textContent = km.toFixed(1);
+  document.querySelector('.qs-dial-center .qs-unit').textContent = RACE_NAMES[km] ? `km · ${RACE_NAMES[km]}` : 'km';
   document.querySelectorAll('#qsPresets button').forEach(b => b.classList.toggle('on', +b.dataset.km === km));
   drawDial();
 });
 
-// ── 거리 다이얼: 왼쪽 아래(1km)에서 시계 방향으로 270° 돌면 오른쪽 아래(10km) ──
-const DIAL = { cx: 130, cy: 130, r: 104, from: 135, sweep: 270, min: 1, max: 10 };
+// ── 거리 다이얼: 왼쪽 아래(1km)에서 시계 방향으로 270° 돌면 오른쪽 아래(42.195km) ──
+// 자주 고르는 1~10km가 다이얼의 55%를 쓴다(0.5km씩 세밀하게). 10km 위는 나머지 45%에 1km씩.
+const DIAL = { cx: 130, cy: 130, r: 104, from: 135, sweep: 270, min: 1, mid: 10, max: 42.195, midShare: 0.55 };
 const dialPoint = (deg, r = DIAL.r) => [DIAL.cx + r * Math.cos(deg * Math.PI / 180), DIAL.cy + r * Math.sin(deg * Math.PI / 180)];
-const dialDeg = km => DIAL.from + (km - DIAL.min) / (DIAL.max - DIAL.min) * DIAL.sweep;
+const dialShare = km => km <= DIAL.mid
+  ? (km - DIAL.min) / (DIAL.mid - DIAL.min) * DIAL.midShare
+  : DIAL.midShare + (km - DIAL.mid) / (DIAL.max - DIAL.mid) * (1 - DIAL.midShare);
+const shareKm = share => share <= DIAL.midShare
+  ? DIAL.min + share / DIAL.midShare * (DIAL.mid - DIAL.min)
+  : DIAL.mid + (share - DIAL.midShare) / (1 - DIAL.midShare) * (DIAL.max - DIAL.mid);
+const dialDeg = km => DIAL.from + dialShare(km) * DIAL.sweep;
+// 다이얼로 고를 수 있는 거리: 10km까지 0.5km씩, 그 위는 1km씩, 맨 끝은 풀코스
+function snapKm(km){
+  if (km >= DIAL.max - 0.5) return DIAL.max;
+  const v = km <= DIAL.mid ? Math.round(km * 2) / 2 : Math.round(km);
+  return Math.min(DIAL.max, Math.max(DIAL.min, v));
+}
 function dialArc(fromDeg, toDeg){
   const [x1, y1] = dialPoint(fromDeg), [x2, y2] = dialPoint(toDeg);
   return `M${x1.toFixed(1)} ${y1.toFixed(1)} A${DIAL.r} ${DIAL.r} 0 ${toDeg - fromDeg > 180 ? 1 : 0} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`;
 }
 document.getElementById('dialTrack').setAttribute('d', dialArc(DIAL.from, DIAL.from + DIAL.sweep));
 (() => {
-  // 눈금: 1km마다, 숫자는 1·3·5·7·10
+  // 눈금: 10km까지 1km마다, 그 위는 5km마다. 숫자는 1·5·10·21(하프)·42(풀코스)
   const ns = 'http://www.w3.org/2000/svg', box = document.getElementById('dialTicks');
-  for (let km = DIAL.min; km <= DIAL.max; km++){
+  const ticks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 21.1, 25, 30, 35, 40, 42.195];
+  const labels = { 1: 1, 5: 5, 10: 10, 21.1: 21, 42.195: 42 };
+  for (const km of ticks){
     const deg = dialDeg(km), [x1, y1] = dialPoint(deg, DIAL.r - 18), [x2, y2] = dialPoint(deg, DIAL.r - 26);
     const tick = document.createElementNS(ns, 'line');
-    tick.setAttribute('class', 'dial-tick' + ([1, 3, 5, 7, 10].includes(km) ? ' major' : ''));
+    tick.setAttribute('class', 'dial-tick' + (km in labels ? ' major' : ''));
     [['x1', x1], ['y1', y1], ['x2', x2], ['y2', y2]].forEach(([k, v]) => tick.setAttribute(k, v.toFixed(1)));
     box.appendChild(tick);
-    if ([1, 3, 5, 7, 10].includes(km)){
+    if (km in labels){
       const [lx, ly] = dialPoint(deg, DIAL.r + 22);
       const label = document.createElementNS(ns, 'text');
       label.setAttribute('class', 'dial-label'); label.setAttribute('x', lx.toFixed(1)); label.setAttribute('y', ly.toFixed(1));
-      label.textContent = km;
+      label.textContent = labels[km];
       box.appendChild(label);
     }
   }
@@ -1191,7 +1319,8 @@ function drawDial(){
   document.getElementById('dialFill').setAttribute('d', dialArc(DIAL.from, Math.max(DIAL.from + 0.01, deg)));
   const [x, y] = dialPoint(deg), knob = document.getElementById('dialKnob');
   knob.setAttribute('cx', x.toFixed(1)); knob.setAttribute('cy', y.toFixed(1));
-  knob.setAttribute('aria-valuenow', km); knob.setAttribute('aria-valuetext', `${km.toFixed(1)}킬로미터`);
+  knob.setAttribute('aria-valuenow', km);
+  knob.setAttribute('aria-valuetext', `${distLabel(km)}킬로미터` + (RACE_NAMES[km] ? `, ${RACE_NAMES[km]}` : ''));
 }
 (() => {
   const svg = document.querySelector('#qsDial svg');
@@ -1200,17 +1329,17 @@ function drawDial(){
     const x = (e.clientX - box.left) / box.width * 260 - DIAL.cx, y = (e.clientY - box.top) / box.height * 260 - DIAL.cy;
     let rel = ((Math.atan2(y, x) * 180 / Math.PI) - DIAL.from + 720) % 360;
     if (rel > DIAL.sweep) rel = rel > DIAL.sweep + (360 - DIAL.sweep) / 2 ? 0 : DIAL.sweep;   // 아래 트인 곳은 가까운 끝으로
-    return DIAL.min + rel / DIAL.sweep * (DIAL.max - DIAL.min);
+    return shareKm(rel / DIAL.sweep);
   }
   function set(km){
     const input = document.getElementById('dist');
-    const v = Math.min(DIAL.max, Math.max(DIAL.min, Math.round(km * 2) / 2));
+    const v = snapKm(km);
     if (v !== parseFloat(input.value)){ input.value = v; input.dispatchEvent(new Event('input')); }
   }
   svg.addEventListener('pointerdown', e => { svg.setPointerCapture(e.pointerId); set(kmAt(e)); });
   svg.addEventListener('pointermove', e => { if (svg.hasPointerCapture(e.pointerId)) set(kmAt(e)); });
   document.getElementById('dialKnob').addEventListener('keydown', e => {
-    const step = { ArrowRight: 0.5, ArrowUp: 0.5, ArrowLeft: -0.5, ArrowDown: -0.5 }[e.key];
+    const step = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[e.key];
     if (step){ e.preventDefault(); stepDistance(step); }
   });
 })();
@@ -1225,7 +1354,7 @@ function showStep(n){
   document.getElementById('qsBack').disabled = qsStep === 0;
   if (qsStep === 2){
     const shape = document.querySelector('#routeSeg button.on span').firstChild.textContent;
-    document.getElementById('qsSummary').textContent = `${parseFloat(document.getElementById('dist').value).toFixed(1)}km · ${shape}`;
+    document.getElementById('qsSummary').textContent = `${distLabel(parseFloat(document.getElementById('dist').value))}km · ${shape}`;
   }
 }
 document.querySelectorAll('[data-next]').forEach(b => b.addEventListener('click', () => showStep(qsStep + 1)));
@@ -1235,15 +1364,22 @@ document.querySelectorAll('#qsPresets button').forEach(b => b.addEventListener('
   input.value = b.dataset.km;
   input.dispatchEvent(new Event('input'));
 }));
-// 목표 거리는 크게 보여주고 −/+로 0.5km씩 바꾼다 (슬라이더와 같은 값)
-function stepDistance(delta){
+// 목표 거리는 크게 보여주고 −/+로 한 칸씩 바꾼다: 10km까지는 0.5km, 그 위는 1km (하프·풀코스에서는 가까운 정수로)
+function stepDistance(direction){
   const input = document.getElementById('dist');
-  const next = Math.min(+input.max, Math.max(+input.min, parseFloat(input.value) + delta));
+  const v = parseFloat(input.value);
+  let next;
+  if (direction > 0){
+    next = v < DIAL.mid ? v + 0.5 : Math.floor(v) + 1;
+    if (next > DIAL.max - 0.5) next = DIAL.max;   // 42 다음은 풀코스
+  } else {
+    next = Math.max(DIAL.min, v <= DIAL.mid ? v - 0.5 : Math.ceil(v) - 1);
+  }
   input.value = next;
   input.dispatchEvent(new Event('input'));
 }
-document.getElementById('distDown').addEventListener('click', () => stepDistance(-0.5));
-document.getElementById('distUp').addEventListener('click', () => stepDistance(0.5));
+document.getElementById('distDown').addEventListener('click', () => stepDistance(-1));
+document.getElementById('distUp').addEventListener('click', () => stepDistance(1));
 // 코스를 보다가 조건을 바꾸고 싶으면 시작 화면으로 돌아간다
 document.getElementById('editBtn').addEventListener('click', () => {
   document.getElementById('routeSheet').hidden = true;
@@ -1395,7 +1531,9 @@ document.getElementById('goBtn').addEventListener('click', async () => {
   goBtn.textContent = '찾는 중';
   stopNavLoop();
   status.classList.remove('live');
-  status.textContent = '서버에 요청 중… (현위치 근처에 없으면 실시간 생성이라 최대 15초 정도 걸릴 수 있습니다)';
+  status.textContent = parseFloat(document.getElementById('dist').value) > 10
+    ? '서버에 요청 중… (긴 코스는 그 자리에서 새로 짜느라 1~2분 걸릴 수 있습니다)'
+    : '서버에 요청 중… (현위치 근처에 없으면 실시간 생성이라 최대 15초 정도 걸릴 수 있습니다)';
 
   const tags = [...document.querySelectorAll('#tagChips .chip.on')].map(b => b.dataset.tag);
   const routeType = document.querySelector('#routeSeg button.on').dataset.v;
@@ -1534,6 +1672,10 @@ function showChoice(choice){
     b.addEventListener('click', () => {
       box.hidden = true;
       if (!Object.keys(option.set).length) return;
+      // 코스 모양을 바꾸는 답(여러 바퀴 대신 왕복·편도)은 화면의 코스 모양 버튼에도 반영한다 — 다음 요청도 그 모양으로
+      if (option.set.route_type){
+        document.querySelectorAll('#routeSeg button').forEach(x => x.classList.toggle('on', x.dataset.v === option.set.route_type));
+      }
       window._choiceSet = { ...(window._appliedSet || {}), ...option.set };
       document.getElementById('goBtn').click();
     });
