@@ -120,3 +120,13 @@ def test_demo_page_loads_the_tmap_map_only_when_a_key_is_set(monkeypatch):
     monkeypatch.delenv("TMAP_APP_KEY")
     page = client.get("/").text
     assert "vectorjs" not in page and "{{TMAP_MAP_SCRIPT}}" not in page
+
+
+def test_scenery_choices_also_carry_the_old_description_field():
+    """팀원 안드로이드 앱(com.example.runmate)은 10월 4일 전 응답에 맞춰져 있어 풍경 선택지의 설명을 description으로
+    읽는다. 지금은 hint로 주므로 같은 값을 description으로도 준다 (빠지면 목록을 통째로 못 읽을 수 있다)."""
+    from fastapi.testclient import TestClient
+    from src.api import main
+    options = TestClient(main.app).get("/onboarding/scenery").json()["scenery"]
+    assert options, "선택지가 있어야 견줄 수 있다"
+    assert all(o["description"] == o["hint"] for o in options)

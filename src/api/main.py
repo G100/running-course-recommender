@@ -268,6 +268,7 @@ def onboarding_scenery(lat: Optional[float] = None, lng: Optional[float] = None,
         distance = min(distances) if distances else None
         options.append({
             "value": name, "label": name, "group": group, "hint": hint,
+            "description": hint,   # 예전 이름 — 팀원 안드로이드 앱이 이 이름으로 읽는다 (10월 4일 전 응답)
             "distance_km": distance, "near": scenery_choices.near_text(distance),
             "course_count": count,
             # 개발자용: 이 선택지가 어떤 측정 기준에 대응하는지
