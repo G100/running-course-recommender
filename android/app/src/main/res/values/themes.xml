@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Runmate" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/run_blue</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+    </style>
+
+    <color name="run_blue">#1E5EFF</color>
+    <color name="course_line">#1E5EFF</color>
+    <color name="warning_ink">#8A2A12</color>
+    <color name="warning_soft">#FDE7DF</color>
+</resources>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 개발판: 같은 와이파이에 있는 PC의 서버(http://192.168.x.x:8000)에 연결할 수 있게 암호화 없는 연결도 허용한다.
+     배포판(src/main)은 HTTPS만 허용한다. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

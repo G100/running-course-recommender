@@ -1,0 +1,13 @@
+# 내 PC 설정: SDK 위치, Tmap 키, 서버 주소 (공개 저장소에 올리지 않는다)
+local.properties
+
+# Tmap 지도 SDK는 Tmap 개발자 사이트에서 각자 받는다 (README의 '안드로이드 앱' 참고)
+app/libs/*.aar
+
+.gradle/
+build/
+app/build/
+.idea/
+*.iml
+.kotlin/
+captures/

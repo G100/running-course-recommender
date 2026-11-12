@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">런메이트</string>
+    <string name="find">코스 찾기</string>
+    <string name="finding">찾는 중…</string>
+    <string name="type_loop">순환</string>
+    <string name="type_roundtrip">왕복</string>
+    <string name="type_oneway">편도</string>
+    <string name="dist_down">거리 줄이기</string>
+    <string name="dist_up">거리 늘리기</string>
+    <string name="need_location">코스를 찾으려면 위치 권한이 필요해요.</string>
+    <string name="locating">현재 위치를 확인하는 중…</string>
+    <string name="no_location">현재 위치를 아직 못 받았어요. 하늘이 보이는 곳에서 다시 눌러 주세요.</string>
+    <string name="no_tmap_key">지도를 띄우려면 android/local.properties에 tmap.key를 넣어 주세요.</string>
+    <string name="guide_start">실제 위치로 안내 시작</string>
+    <string name="guide_stop">안내 끝내기</string>
+    <string name="waiting_gps">GPS 위치를 기다리는 중…</string>
+    <string name="gps_lost">GPS 신호를 잠시 잃었어요 · 다시 잡는 중</string>
+    <string name="arrived">도착했어요! 수고하셨습니다.</string>
+    <string name="rate_question">이 코스 어땠어요?</string>
+    <string name="rate_send">평가 보내기</string>
+    <string name="rate_sent">고마워요! 다음 추천에 반영할게요.</string>
+    <string name="no_results">조건에 맞는 코스가 없어요. 거리를 바꿔 다시 찾아보세요.</string>
+</resources>

@@ -370,9 +370,25 @@ python -m src.data_collection.local_osm     # 지도 DB만 따로 만들 때 (�
 - 길 점수 모델(`data/road_model.json`)은 저장소에 들어 있어 다시 학습할 필요 없다. 다시 하려면 `python -m src.recommend.learn_roads --cells 2496`
 - 내려받기가 안 되면 https://download.geofabrik.de/asia/south-korea.html 에서 `.osm.pbf`를 직접 받아 `--pbf 경로`로 준다
 
+## 안드로이드 앱 (만드는 중)
+
+`android/`는 Kotlin 앱입니다. 지도는 Tmap 벡터 지도 SDK로 그리고, 코스 찾기·재탐색은 이 서버에 묻습니다(웹 페이지와 같은 API). 지금 되는 것: 현재 위치에서 코스 찾기, 후보 고르기, 지도에 코스 그리기, 실제 위치로 음성 안내(회전 예고·실행, 코스 이탈 시 재탐색, 화면 켜 두기). 도착하면 별점을 보내 다음 추천에 반영합니다. 화면이 꺼져도 도는 안내는 아직 없습니다.
+
+1. 안드로이드 SDK를 설치합니다(Android Studio 설치 마법사 → Standard, 또는 [command-line tools](https://developer.android.com/studio#command-line-tools-only)의 `sdkmanager`). 위치는 아래 `sdk.dir`과 같게 둡니다.
+2. Tmap 벡터 지도 SDK를 받습니다: [Tmap API 가이드 → VSM_Android → SDK 다운로드](https://tmapapi.tmapmobility.com/main.html#androidVSM/sample/androidSample.sdk_download)에서 V3.8을 받아, 압축 안 `lib/`의 `.aar` 두 개를 `android/app/libs/`에 넣습니다. SDK는 Tmap의 것이라 저장소에 올리지 않습니다.
+3. `android/local.properties`를 만듭니다(git에 올리지 않습니다):
+   ```
+   sdk.dir=C\:\\Users\\<사용자>\\Android\\Sdk
+   tmap.key=<서버의 TMAP_APP_KEY와 같은 키>
+   runmate.server=http://<이 PC의 와이파이 주소>:8000
+   ```
+4. 서버를 와이파이에서도 접속되게 띄웁니다: `python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000` (Windows 방화벽이 물으면 허용). 폰과 PC는 같은 와이파이에 있어야 합니다. 개발판 앱만 암호화 없는 주소(http)에 연결하고, 배포판은 https만 씁니다.
+5. 빌드·테스트: `cd android` 후 `gradlew.bat testDebugUnitTest`(안내 규칙·응답 읽기 단위 테스트), `gradlew.bat installDebug`(연결한 폰에 설치).
+
 ## 구조
 
 ```
+android/              안드로이드 앱 (Kotlin, Tmap 지도)
 src/api/              FastAPI 서버, 데모 페이지(static/navigate.html)
 src/recommend/        점수 계산, 거리·시간대·안전, Tmap으로 잇기, 코스 자르기
 src/data_collection/  코스 수집·보강 스크립트
