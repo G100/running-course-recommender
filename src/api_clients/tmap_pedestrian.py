@@ -8,10 +8,27 @@
 """
 import os
 import re
+import time
 
 import requests
 
 PEDESTRIAN_URL = "https://apis.openapi.sk.com/tmap/routes/pedestrian"
+LIMIT_RECHECK_S = 600   # 하루 한도를 넘으면 이만큼은 묻지 않는다. 풀리는 시각을 몰라서 이 간격으로 한 번씩 다시 본다
+_limit_hit_at = None    # 한도를 넘었다는 답을 받은 시각 (서버가 떠 있는 동안 기억한다)
+
+
+class DailyLimitReached(requests.HTTPError):
+    """Tmap 하루 호출 한도(무료 1,000건)를 넘었다. 한도가 풀릴 때까지 무엇을 물어도 거절당한다.
+    HTTPError이므로 예전처럼 HTTPError로 받는 곳은 그대로 동작한다."""
+
+
+def _over_daily_limit(resp) -> bool:
+    if getattr(resp, "status_code", None) != 429:
+        return False
+    try:
+        return (resp.json().get("error") or {}).get("code") == "QUOTA_EXCEEDED"
+    except ValueError:
+        return False
 
 
 def get_route(start: tuple, end: tuple, start_name: str = "", end_name: str = "",
@@ -25,6 +42,9 @@ def get_route(start: tuple, end: tuple, start_name: str = "", end_name: str = ""
     if not app_key:
         raise RuntimeError("TMAP_APP_KEY 환경변수가 설정되지 않았습니다.")
 
+    global _limit_hit_at
+    if _limit_hit_at is not None and time.time() - _limit_hit_at < LIMIT_RECHECK_S:
+        raise DailyLimitReached("Tmap 하루 호출 한도를 넘었습니다 (잠시 뒤 다시 확인합니다)")
     headers = {"appKey": app_key, "Content-Type": "application/json", "Accept": "application/json"}
     body = {
         "startX": str(start[0]), "startY": str(start[1]), "startName": start_name or "출발지",
@@ -33,6 +53,10 @@ def get_route(start: tuple, end: tuple, start_name: str = "", end_name: str = ""
     if waypoints:
         body["passList"] = "_".join(f"{lng},{lat}" for lng, lat in waypoints)
     resp = requests.post(PEDESTRIAN_URL, params={"version": 1}, headers=headers, json=body, timeout=15)
+    if _over_daily_limit(resp):
+        _limit_hit_at = time.time()
+        raise DailyLimitReached("Tmap 하루 호출 한도를 넘었습니다", response=resp)
+    _limit_hit_at = None
     resp.raise_for_status()
     return resp.json()
 

@@ -45,7 +45,7 @@ from ..recommend.step_position import assign_positions
 from ..data_collection import course_file, local_osm
 from ..recommend import auth, laps, nearby_scenery, reroute, scenery_choices, tmap_follow, user_store
 from ..data_collection import area_cache
-from ..api_clients.tmap_pedestrian import extract_path, extract_steps
+from ..api_clients.tmap_pedestrian import DailyLimitReached, extract_path, extract_steps
 from ..recommend.timeofday import current_period
 
 load_dotenv()
@@ -484,6 +484,7 @@ def _follow_with_tmap(path: list, target_km: float = None) -> dict:
     return tmap_follow.follow(area.graph, path, target_km=target_km)
 
 
+DAILY_LIMIT_TEXT = "오늘 Tmap 길 확인 횟수를 다 썼어요."   # 한도가 풀리는 시각은 확인하지 못해 약속하지 않는다
 MAX_TMAP_ROUNDS = 3     # Tmap으로 잇고 거리를 재는 횟수 (처음 + 크기를 고쳐 다시 짜기 2번)
 DISTANCE_OK = 0.05      # 실제로 달릴 경로가 요청 거리와 이 비율 안이어야 한다
 
@@ -496,15 +497,20 @@ def _deliver_on_tmap(plan: dict, target_km: float, route_type: str, regenerate) 
     - 편도: 길면 요청 거리에서 끝낸다(잘라도 코스가 된다).
     - 순환·왕복: 자르면 출발점으로 돌아오지 못하니, Tmap이 늘린(줄인) 비율만큼 크기를 고쳐 다시 짜고
       다시 잇는다(최대 2번). 가장 가까웠던 것을 쓴다.
-    Tmap을 쓸 수 없으면(키 없음·장애) 우리가 짠 코스를 그대로 준다 — 안내 시작 때 다시 잇는다.
+    Tmap을 쓸 수 없으면(키 없음·장애·하루 한도) 우리가 짠 코스를 그대로 주되, Tmap으로 길을 확인하지 못했다고
+    표시한다(tmap_unchecked: daily_limit 또는 unavailable) — 화면이 러너에게 알린다. 안내 시작 때 다시 잇는다.
     """
     if not target_km or not plan.get("path"):
         return plan
-    tries = []
+    tries, unchecked = [], None
     for attempt in range(MAX_TMAP_ROUNDS):
         try:
             route = _follow_with_tmap(plan["path"], target_km)
+        except DailyLimitReached:
+            unchecked = "daily_limit"
+            break
         except (RuntimeError, requests.RequestException, HTTPException):
+            unchecked = "unavailable"
             break
         km = route["follow"]["distance_km"]
         tries.append((abs(km - target_km) / target_km, plan, route))
@@ -519,7 +525,7 @@ def _deliver_on_tmap(plan: dict, target_km: float, route_type: str, regenerate) 
             break
         plan = resized
     if not tries:
-        return plan
+        return dict(plan, tmap_unchecked=unchecked)
     _, plan, route = min(tries, key=lambda t: t[0])
     path, _ = extract_path(route)
     delivered = dict(plan, path=path, steps=assign_positions(extract_steps(route), path),
@@ -586,6 +592,8 @@ def follow_course(req: FollowRequest):
     """사용자가 고른 코스를 Tmap 보행자 경로로 잇는다. 길 안내는 이 경로와 Tmap의 회전 안내로 한다."""
     try:
         route = _follow_with_tmap([list(p) for p in req.path], req.target_km)
+    except DailyLimitReached:
+        raise HTTPException(status_code=503, detail=DAILY_LIMIT_TEXT)
     except (RuntimeError, requests.RequestException) as error:
         raise HTTPException(status_code=502, detail=f"Tmap 경로를 받지 못했습니다: {error}")
     path, _ = extract_path(route)

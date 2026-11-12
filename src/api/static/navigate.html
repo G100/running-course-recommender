@@ -476,6 +476,7 @@
             <div><div class="n" id="statScore">—</div><div class="l">코스 점수 / 100</div></div>
           </div>
           <div class="off-target" id="offTarget" hidden></div>
+          <div class="off-target" id="uncheckedNote" hidden></div>
           <div class="note" id="routeNote"></div>
           <button class="startbtn" id="navBtn">실제 위치로 안내 시작</button>
           <div class="sheet-actions">
@@ -875,6 +876,9 @@ function showRouteSheet(course, score){
   const off = offTargetText(course);
   document.getElementById('offTarget').hidden = !off;
   document.getElementById('offTarget').textContent = off || '';
+  const unchecked = uncheckedText(course);
+  document.getElementById('uncheckedNote').hidden = !unchecked;
+  document.getElementById('uncheckedNote').textContent = unchecked || '';
   document.getElementById('statSignal').textContent = course.traffic_signal_count;
   document.getElementById('statScore').textContent = Math.round(score*100);
 
@@ -1103,6 +1107,7 @@ function startNavigationGPS(course){
   let pathArr = course.path;
   let cum = cumulativeDistances(pathArr);
   let run = startNavLoop(course, PACE_MIN_PER_KM);
+  if (uncheckedText(course)) speak(UNCHECKED_SAY);
   const stopWatching = () => {
     if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
     holdScreen(false);   // 도착했다 — 화면을 더 붙잡아 둘 이유가 없다
@@ -1226,7 +1231,7 @@ async function followWithTmap(course){
     showTmapRoute(course);
   } catch (e){
     course._tmapFailed = true;
-    status.textContent = 'Tmap으로 잇지 못해 우리 지도 경로로 안내합니다: ' + e.message;
+    status.textContent = 'Tmap으로 잇지 못해 설계한 코스로 안내해요. 달리면서 길을 살펴 주세요. (' + e.message + ')';
   }
   return course;
 }
@@ -1612,6 +1617,17 @@ function renderCourseOptions(){
     box.appendChild(b);
   });
 }
+
+// Tmap이 이 코스를 확인해 주지 못했으면(하루 한도·연결 안 됨) 그렇다고 말한다. 거리는 우리 도로망으로 맞췄지만,
+// 인도·횡단보도로 이어지는지와 회전 안내는 Tmap이 확인한 것이 아니다.
+function uncheckedText(course){
+  if (!course || course.tmap || course._tmap) return null;
+  const why = { daily_limit: '오늘 Tmap 길 확인 횟수를 다 써서', unavailable: '지금 Tmap에 연결되지 않아' }[course.tmap_unchecked]
+    || (course._deliverFailed || course._tmapFailed ? 'Tmap에 연결되지 않아' : null);
+  if (!why) return null;
+  return `${why} 이 코스는 Tmap으로 길을 확인하지 못했어요. 거리는 맞췄지만 인도·횡단보도 안내가 틀릴 수 있으니 달리면서 길을 살펴 주세요.`;
+}
+const UNCHECKED_SAY = 'Tmap으로 길을 확인하지 못한 코스입니다. 달리면서 길을 살펴 주세요.';
 
 // 실제로 달릴 경로(Tmap)의 거리가 요청과 5% 넘게 다르면 그렇다고 말한다. Tmap이 우리 설계 대신 지름길로
 // 이어서 크기를 고쳐도 맞지 않는 코스가 있다(광주 상무 3km 순환 → 2.72km). 다른 후보가 있으면 고르게 한다.

@@ -60,3 +60,67 @@ class TestRunnerFriendlyInstructions:
         assert self._say(_point("엘리베이터 이용 후 5m 이동", 999)) == ["엘리베이터 이용 후 5m 이동"]
         steps = tmap_pedestrian.extract_steps({"features": [_point("우회전 후 30m 이동", 13)]})
         assert steps[0]["description"] == "우회전 후 30m 이동", "원래 문구도 그대로 둔다"
+
+
+class TestDailyLimit:
+    """Tmap 하루 한도(무료 1,000건)를 넘으면 한도가 풀릴 때까지 무엇을 물어도 거절당한다. 그런데도 조각마다
+    1·2초씩 쉬며 세 번씩 다시 물었고, 다른 곳(인도 확인)도 계속 물었다. 넘었다는 걸 기억하고 묻지 않는다."""
+
+    def _tmap(self, monkeypatch, answers):
+        import requests
+        sent = []
+
+        class Response:
+            def __init__(self, status, body):
+                self.status_code, self.body = status, body
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    raise requests.HTTPError(f"{self.status_code} Client Error", response=self)
+
+            def json(self):
+                return self.body
+
+        def post(url, **kwargs):
+            sent.append(kwargs)
+            return Response(*answers.pop(0))
+
+        monkeypatch.setenv("TMAP_APP_KEY", "test-key")
+        monkeypatch.setattr(tmap_pedestrian.requests, "post", post)
+        return sent
+
+    QUOTA = (429, {"error": {"id": "429", "category": "gw", "code": "QUOTA_EXCEEDED", "message": "Limit Exceeded"}})
+    BUSY = (429, {"error": {"code": "TOO_MANY_REQUESTS"}})
+    OK = (200, {"features": []})
+
+    def test_the_daily_limit_is_told_apart_from_being_busy(self, monkeypatch):
+        import pytest
+        import requests
+        self._tmap(monkeypatch, [self.QUOTA])
+        with pytest.raises(tmap_pedestrian.DailyLimitReached) as caught:
+            tmap_pedestrian.get_route((127.0, 34.0), (127.01, 34.0))
+        assert isinstance(caught.value, requests.HTTPError), "예전처럼 HTTPError로 받는 곳도 그대로 동작한다"
+
+    def test_after_the_limit_tmap_is_not_asked_again_for_a_while(self, monkeypatch):
+        import pytest
+        sent = self._tmap(monkeypatch, [self.QUOTA, self.OK])
+        clock = [1000.0]
+        monkeypatch.setattr(tmap_pedestrian.time, "time", lambda: clock[0])
+        with pytest.raises(tmap_pedestrian.DailyLimitReached):
+            tmap_pedestrian.get_route((127.0, 34.0), (127.01, 34.0))
+        clock[0] += tmap_pedestrian.LIMIT_RECHECK_S - 1
+        with pytest.raises(tmap_pedestrian.DailyLimitReached):
+            tmap_pedestrian.get_route((127.0, 34.0), (127.01, 34.0))
+        assert len(sent) == 1, "한도를 넘은 동안은 묻지 않는다"
+        clock[0] += 2
+        assert tmap_pedestrian.get_route((127.0, 34.0), (127.01, 34.0)) == {"features": []}, "한동안 지나면 다시 물어본다"
+        assert len(sent) == 2
+
+    def test_being_busy_is_not_remembered(self, monkeypatch):
+        import pytest
+        import requests
+        sent = self._tmap(monkeypatch, [self.BUSY, self.OK])
+        with pytest.raises(requests.HTTPError) as caught:
+            tmap_pedestrian.get_route((127.0, 34.0), (127.01, 34.0))
+        assert not isinstance(caught.value, tmap_pedestrian.DailyLimitReached)
+        assert tmap_pedestrian.get_route((127.0, 34.0), (127.01, 34.0)) == {"features": []} and len(sent) == 2

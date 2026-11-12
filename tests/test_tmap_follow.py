@@ -364,3 +364,20 @@ def test_a_piece_that_fails_for_another_reason_fails_the_whole_stitch(monkeypatc
     monkeypatch.setattr(tmap_follow, "get_route", broken)
     with pytest.raises(requests.ConnectionError):
         tmap_follow.stitch((LAT, LNG), (LAT, LNG + D), [(LAT + D * i, LNG) for i in range(1, 13)])
+
+
+def test_a_piece_refused_for_the_daily_limit_is_not_asked_again(monkeypatch):
+    """하루 한도를 넘었으면 쉬었다 다시 물어도 소용없다 — 바로 실패한다."""
+    import pytest
+    from src.api_clients.tmap_pedestrian import DailyLimitReached
+    asked = []
+
+    def over_limit(start, end, start_name="", end_name="", waypoints=None):
+        asked.append(start)
+        raise DailyLimitReached("Tmap 하루 한도를 넘었습니다")
+
+    monkeypatch.setattr(tmap_follow, "get_route", over_limit)
+    monkeypatch.setattr(tmap_follow, "TMAP_BUSY_WAIT_S", 5.0)
+    with pytest.raises(DailyLimitReached):
+        tmap_follow.stitch((LAT, LNG), (LAT, LNG + D), [(LAT + D, LNG)])
+    assert len(asked) == 1

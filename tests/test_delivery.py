@@ -73,4 +73,50 @@ def test_when_tmap_cannot_be_reached_the_plan_is_given_as_is(monkeypatch):
 
     monkeypatch.setattr(main, "_follow_with_tmap", down)
     plan = _plan(TARGET)
-    assert main._deliver_on_tmap(plan, TARGET, "loop", lambda km: None) is plan
+    given = main._deliver_on_tmap(plan, TARGET, "loop", lambda km: None)
+    assert {k: v for k, v in given.items() if k != "tmap_unchecked"} == plan
+    assert given["tmap_unchecked"] == "unavailable", "Tmap으로 확인하지 못했다고 러너에게 알린다"
+
+
+def test_when_the_tmap_daily_limit_is_used_up_the_runner_is_told_why(monkeypatch):
+    from src.api_clients.tmap_pedestrian import DailyLimitReached
+
+    def used_up(path, target_km=None):
+        raise DailyLimitReached("Tmap 하루 호출 한도를 넘었습니다")
+
+    monkeypatch.setattr(main, "_follow_with_tmap", used_up)
+    assert main._deliver_on_tmap(_plan(TARGET), TARGET, "loop", lambda km: None)["tmap_unchecked"] == "daily_limit"
+
+
+def test_a_course_joined_on_tmap_is_not_marked_unchecked(monkeypatch):
+    follow, _ = _tmap_follow(1.0)
+    monkeypatch.setattr(main, "_follow_with_tmap", follow)
+    assert "tmap_unchecked" not in main._deliver_on_tmap(_plan(TARGET), TARGET, "loop", lambda km: None)
+
+
+def test_tmap_failing_on_a_later_try_keeps_the_route_tmap_already_gave(monkeypatch):
+    """크기를 고쳐 다시 잇다가 한도가 끝나도, 그 전에 Tmap이 이어 준 경로가 있으면 그것을 쓴다."""
+    from src.api_clients.tmap_pedestrian import DailyLimitReached
+    follow, calls = _tmap_follow(1.2)
+
+    def then_used_up(path, target_km=None):
+        if calls:
+            raise DailyLimitReached("Tmap 하루 호출 한도를 넘었습니다")
+        return follow(path, target_km)
+
+    monkeypatch.setattr(main, "_follow_with_tmap", then_used_up)
+    given = main._deliver_on_tmap(_plan(TARGET), TARGET, "loop", lambda km: _plan(km))
+    assert given.get("tmap") and "tmap_unchecked" not in given
+
+
+def test_following_a_course_after_the_daily_limit_says_so_plainly(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from src.api_clients.tmap_pedestrian import DailyLimitReached
+
+    def used_up(path, target_km=None):
+        raise DailyLimitReached("Tmap 하루 호출 한도를 넘었습니다")
+
+    monkeypatch.setattr(main, "_follow_with_tmap", used_up)
+    res = TestClient(main.app).post("/courses/follow", json={"path": _straight(1)})
+    assert res.status_code == 503 and "오늘" in res.json()["detail"]

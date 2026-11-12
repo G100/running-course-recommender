@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
-from ..api_clients.tmap_pedestrian import extract_path, get_route
+from ..api_clients.tmap_pedestrian import DailyLimitReached, extract_path, get_route
 from ..data_collection.enrich import haversine_m
 from . import sidewalk
 from .flow import junctions_per_km
@@ -95,8 +95,9 @@ def _ask_piece(chunk: list) -> dict:
         try:
             return ask()
         except requests.HTTPError as error:
-            if error.response is None or error.response.status_code != 429 or attempt == 2:
-                raise
+            if (isinstance(error, DailyLimitReached) or error.response is None
+                    or error.response.status_code != 429 or attempt == 2):
+                raise   # 하루 한도를 넘었으면 쉬었다 다시 물어도 소용없다
             time.sleep(TMAP_BUSY_WAIT_S * (attempt + 1))
 
 

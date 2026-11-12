@@ -58,6 +58,9 @@ def no_outbound_requests(monkeypatch):
     # 한 테스트의 Overpass 장애 쿨다운이 다음 테스트로 새지 않게
     from src.data_collection import osm_overpass
     monkeypatch.setattr(osm_overpass, "_retry_after", 0.0)
+    # Tmap 하루 한도를 넘었다는 기억도 테스트마다 지운다
+    from src.api_clients import tmap_pedestrian
+    monkeypatch.setattr(tmap_pedestrian, "_limit_hit_at", None)
 
 
 @pytest.fixture
