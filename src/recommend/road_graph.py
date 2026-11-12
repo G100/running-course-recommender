@@ -10,6 +10,7 @@ Tmap 보행자 경로는 최단 거리를 준다. 러닝 코스로는 맞지 않
 
 안내(턴바이턴)도 여기서 만든다. 출력은 Tmap 응답과 같은 모양이라 뒤 단계가 그대로 쓴다.
 """
+import collections
 import heapq
 import json
 import math
@@ -51,6 +52,7 @@ REUSE_PENALTY = 4.0          # 이미 지나간 길을 다시 지나면 이만�
 # 거리가 늘어난다. 막지는 않는다 — 다른 길이 아예 없으면 그 길이라도 써야 한다
 TMAP_AVOIDED_PENALTY = 4.0
 SNAP_M = 150
+MAIN_SHARE = 0.05   # 동네에서 가장 큰 도로망 조각의 이만큼은 되어야 '이어진 길'로 본다 (강 건너 다른 큰 조각은 쓴다)
 TURN_DEG = 35                # 이보다 크게 꺾이면 좌·우회전으로 안내한다
 
 _model_cache = {}
@@ -199,6 +201,25 @@ class RoadGraph:
                 self.adjacent[b].append((a, length, way))
         for node in self.adjacent:
             self._grid[self._cell(node)].append(node)
+        self._piece = self._pieces()
+        self._main = max(collections.Counter(self._piece.values()).values(), default=0)
+
+    def _pieces(self) -> dict:
+        """노드 -> 이어진 조각 번호. 길로 서로 닿는 노드끼리 같은 조각이다."""
+        piece, label = {}, 0
+        for root in self.adjacent:
+            if root in piece:
+                continue
+            label += 1
+            piece[root] = label
+            stack = [root]
+            while stack:
+                node = stack.pop()
+                for neighbour, _, _ in self.adjacent[node]:
+                    if neighbour not in piece:
+                        piece[neighbour] = label
+                        stack.append(neighbour)
+        return piece
 
     @staticmethod
     def _cell(node: tuple) -> tuple:
@@ -252,15 +273,32 @@ class RoadGraph:
         return found
 
     def nearest_node(self, lat: float, lng: float, radius_m: float = SNAP_M):
+        """가장 가까운 노드. 도로망에서 떨어진 작은 조각(어디에도 이어지지 않은 계단 등)은 건너뛴다 —
+        거기서는 어느 경로도 짤 수 없다(광주 7km 순환이 코스 없음으로 끝났다: 출발점 옆 26m 계단, 이어진 점 10개).
+        주변에 그런 조각밖에 없으면 그것을 준다."""
         r, c = self._cell((lat, lng))
-        best, best_d = None, radius_m
+        best = best_any = None
+        best_d = best_any_d = radius_m
         for dr in (-1, 0, 1):
             for dc in (-1, 0, 1):
                 for node in self._grid.get((r + dr, c + dc), ()):
                     d = haversine_m((lat, lng), node)
-                    if d <= best_d:
+                    if d <= best_any_d:
+                        best_any, best_any_d = node, d
+                    if d <= best_d and self._on_main_network(node):
                         best, best_d = node, d
-        return best
+        return best if best is not None else best_any
+
+    def _on_main_network(self, node) -> bool:
+        """이 노드가 동네의 큰 도로망에 이어져 있나 (가장 큰 조각의 MAIN_SHARE 이상인 조각)."""
+        size = self._piece_size.get(self._piece[node])
+        return size >= self._main * MAIN_SHARE
+
+    @property
+    def _piece_size(self) -> dict:
+        if not hasattr(self, "_sizes"):
+            self._sizes = collections.Counter(self._piece.values())
+        return self._sizes
 
     def distances_from(self, start: tuple, max_m: float) -> dict:
         """{노드: 걸어서 가는 최단 거리 m} — max_m까지. 막힌 길(인도 없는 차도)은 지나지 않는다."""

@@ -254,3 +254,39 @@ def test_a_forest_trail_tmap_has_ridden_before_is_still_used():
     graph = rg.RoadGraph(ways, build_indexes({"all": ways}), rg.PRIOR, ridden={way_id(trail)})
     _, distance = extract_path(rg.route(graph, a, b))
     assert distance == pytest.approx(364, rel=0.05), "Tmap이 탄 적 있는 길은 Tmap 지도에 있는 길이다"
+
+
+# ── 도로망에서 떨어진 작은 조각에는 붙지 않는다 ──
+# 광주 7km 순환이 코스 없음(404)으로 끝났다. 출발점에서 가장 가까운 점이 어디에도 이어지지 않은 26m짜리 계단
+# (이어진 점 10개, 동네 전체 46,305개)이라 어느 경로도 짤 수 없었다.
+
+def _island_town():
+    """점 수십 개로 이어진 큰 도로망(사각 고리)과, 출발점 바로 옆에 아무 데도 안 이어진 계단 하나."""
+    a, b = (LAT, LNG), (LAT, LNG + 4 * D)
+    stairs = [(LAT - 0.0002, LNG + 0.00005), (LAT - 0.0002, LNG + 0.0004)]
+    along = lambda p, q, n: [(p[0] + (q[0] - p[0]) * i / n, p[1] + (q[1] - p[1]) * i / n) for i in range(n + 1)]
+    top = (LAT + D, LNG + 4 * D)
+    return [
+        _way(1, along(a, b, 20), highway="footway"),
+        _way(2, along(b, top, 10)[:-1] + along(top, (LAT + D, LNG), 20)[:-1] + along((LAT + D, LNG), a, 10), highway="footway"),
+        _way(3, stairs, highway="steps"),
+    ], a, b, stairs
+
+
+def test_a_point_next_to_a_lone_piece_of_path_snaps_to_the_main_network():
+    ways, a, b, stairs = _island_town()
+    graph = _graph(ways)
+    start = (LAT - 0.00015, LNG + 0.00005)   # 계단 끝이 출발점에 더 가깝다 (약 6m, 큰 길은 약 17m)
+    assert graph.nearest_node(*start) == a, "이어지지 않은 계단에 붙었다"
+
+
+def test_a_route_from_beside_a_lone_piece_of_path_is_found():
+    ways, a, b, stairs = _island_town()
+    start = (LAT - 0.00015, LNG + 0.00005)
+    assert rg.route(_graph(ways), start, start, waypoints=[b]) is not None
+
+
+def test_a_point_with_only_a_lone_piece_nearby_still_snaps_to_it():
+    ways, a, b, stairs = _island_town()
+    graph = _graph([w for w in ways if w["id"] == 3])   # 동네에 그 계단뿐이면 그것밖에 없다
+    assert graph.nearest_node(*stairs[0]) == stairs[0]
