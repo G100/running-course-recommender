@@ -36,9 +36,10 @@ from ..recommend.route_type import apply_route_type, attach_actual_return_path
 from ..recommend.personalize import forget_legacy
 from ..recommend.personalize import (answer_labels, answers_view, explain, feedback_questions, invalid_aspects, learn,
                                      learn_aspects,
-                                     load_profile, new_profile, recalled, remember_recommendation, save_profile,
+                                     load_profile, new_profile, recalled, recalled_record, remember_recommendation,
+                                     save_profile,
                                      taste_summary, weights_for)
-from ..recommend.score import component_scores, filter_by_required_tags, recommend
+from ..recommend.score import component_scores, filter_by_required_tags, measures, recommend
 from ..recommend.trim import truncate_course
 from ..recommend.step_position import assign_positions
 from ..data_collection import course_file, local_osm
@@ -310,17 +311,18 @@ def post_feedback(req: FeedbackRequest, authorization: Optional[str] = Header(de
     if remembered is None:
         raise HTTPException(status_code=404, detail="이 사용자에게 최근 추천된 코스가 아닙니다.")
     scores, baseline = remembered
+    record = recalled_record(profile, req.course_id)   # 평가 기록에 남길 측정값 (학습하기 전에 꺼내 둔다)
     learn(profile, scores, req.rating, baseline)
     # 별점은 "무엇이" 좋았는지를 다른 코스와의 차이로 추정한다. 항목별 답은 그 항목에 대한 직접 증거다
     learn_aspects(profile, req.aspects)
     save_profile(profile)
     # 학습에 쓰고 버리지 않고 기록으로도 남긴다 — 다른 사람에게 평균 별점과 후기를 보여줄 수 있게
     user_store.save_review(req.user_id, req.course_id, req.rating, req.comment, req.aspects)
-    _log_feedback(req, profile["weights"])
+    _log_feedback(req, profile["weights"], record)
     return _profile_view(profile)
 
 
-def _log_feedback(req, weights: Optional[dict]) -> None:
+def _log_feedback(req, weights: Optional[dict], record: Optional[dict] = None) -> None:
     """평가 한 번을 이력으로 남긴다 — 그 사람이 나중에 자기 취향이 어떻게 만들어졌는지 볼 수 있게."""
     course = _known_course(req.course_id) or next(
         (item["course"] for item in user_store.favorites(req.user_id) if item["course"]["id"] == req.course_id), None)
@@ -328,7 +330,7 @@ def _log_feedback(req, weights: Optional[dict]) -> None:
         req.user_id, req.course_id, req.rating, req.aspects, req.comment,
         course_name=course.get("name") if course else None,
         labels=scenery_choices.labels_for(course.get("tags")) if course else [],
-        weights={k: round(v, 4) for k, v in weights.items()} if weights else None)
+        weights={k: round(v, 4) for k, v in weights.items()} if weights else None, measures=record)
 
 
 def _known_course(course_id: str):
@@ -698,14 +700,14 @@ def post_recommend(req: RecommendRequest, background_tasks: BackgroundTasks,
         course = result["course"]
         breakdown = component_scores(course, user)
         result["score_breakdown"] = {k: round(v, 3) for k, v in breakdown.items()}
-        breakdowns.append((course["id"], breakdown))
+        breakdowns.append((course["id"], breakdown, measures(course, user)))
 
     if profile is not None:
-        for course_id, breakdown in breakdowns:
+        for course_id, breakdown, measured in breakdowns:
             # 비교 기준은 "이 코스 말고 같이 보여준 다른 코스들"의 평균
-            others = [b for cid, b in breakdowns if cid != course_id]
+            others = [b for cid, b, _ in breakdowns if cid != course_id]
             baseline = {k: sum(o[k] for o in others) / len(others) for k in breakdown} if others else None
-            remember_recommendation(profile, course_id, breakdown, baseline)
+            remember_recommendation(profile, course_id, breakdown, baseline, measured)
         save_profile(profile)
     return response
 

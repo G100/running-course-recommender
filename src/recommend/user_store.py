@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     user_id TEXT PRIMARY KEY, body TEXT NOT NULL, updated_at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS feedback_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, course_id TEXT NOT NULL, course_name TEXT,
-    labels TEXT, rating INTEGER NOT NULL, aspects TEXT, comment TEXT, weights TEXT, created_at REAL NOT NULL);
+    labels TEXT, rating INTEGER NOT NULL, aspects TEXT, comment TEXT, weights TEXT, created_at REAL NOT NULL,
+    measures TEXT);
 CREATE INDEX IF NOT EXISTS feedback_user ON feedback_log (user_id, created_at);
 CREATE TABLE IF NOT EXISTS favorites (
     user_id TEXT NOT NULL, course_id TEXT NOT NULL, course TEXT NOT NULL,
@@ -59,6 +60,8 @@ def _connect() -> sqlite3.Connection:
     db.executescript(_SCHEMA)
     if "aspects" not in [row[1] for row in db.execute("PRAGMA table_info(reviews)")]:
         db.execute("ALTER TABLE reviews ADD COLUMN aspects TEXT")   # 예전에 만든 파일
+    if "measures" not in [row[1] for row in db.execute("PRAGMA table_info(feedback_log)")]:
+        db.execute("ALTER TABLE feedback_log ADD COLUMN measures TEXT")   # 예전에 만든 파일
     return db
 
 
@@ -141,15 +144,17 @@ def put_profile(profile: dict) -> None:
 
 
 def log_feedback(user_id: str, course_id: str, rating: int, aspects: dict = None, comment: str = None,
-                 course_name: str = None, labels: list = None, weights: dict = None) -> None:
-    """평가 한 번을 그대로 남긴다. reviews는 코스당 최신 하나만 갖지만, 여기는 전부 쌓인다."""
+                 course_name: str = None, labels: list = None, weights: dict = None, measures: dict = None) -> None:
+    """평가 한 번을 그대로 남긴다. reviews는 코스당 최신 하나만 갖지만, 여기는 전부 쌓인다.
+    measures: 추천할 때의 항목별 점수·비교 기준·측정값 — 나중에 점수식을 새로 찾는 재료 (추천 없이 남긴 후기는 없다)."""
     with _open() as db:
         db.execute(
             "INSERT INTO feedback_log (user_id, course_id, course_name, labels, rating, aspects, comment, weights, "
-            "created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            "created_at, measures) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (user_id, course_id, course_name, json.dumps(labels or [], ensure_ascii=False), rating,
              json.dumps(aspects, ensure_ascii=False) if aspects else None, (comment or "").strip() or None,
-             json.dumps(weights) if weights else None, time.time()))
+             json.dumps(weights) if weights else None, time.time(),
+             json.dumps(measures, ensure_ascii=False) if measures else None))
 
 
 def feedback_history(user_id: str, limit: int = 100) -> list:

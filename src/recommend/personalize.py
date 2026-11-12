@@ -261,16 +261,26 @@ def _only_active(weights: dict) -> dict:
 
 
 def remember_recommendation(profile: dict, course_id: str, component_scores: dict,
-                            alternatives_mean: dict = None) -> None:
-    """나중에 평가가 오면 '그때 무엇 때문에, 무엇과 비교해 추천했는지'로 학습하기 위해 남긴다."""
+                            alternatives_mean: dict = None, measures: dict = None) -> None:
+    """나중에 평가가 오면 '그때 무엇 때문에, 무엇과 비교해 추천했는지'로 학습하기 위해 남긴다.
+    measures(점수 매기기 전 측정값)는 학습에 쓰지 않고 평가 기록에 같이 남긴다 — 나중에 점수식을 새로 찾는 재료다."""
     recent = profile.setdefault("recent", {})
     recent.pop(course_id, None)
     recent[course_id] = {
         "scores": {k: round(v, 4) for k, v in component_scores.items()},
         "baseline": {k: round(v, 4) for k, v in alternatives_mean.items()} if alternatives_mean else None,
+        "measures": measures,
     }
     while len(recent) > RECENT_LIMIT:
         recent.pop(next(iter(recent)))
+
+
+def recalled_record(profile: dict, course_id: str):
+    """평가 기록에 남길 것: {scores, baseline, measures} 또는 None."""
+    entry = profile.get("recent", {}).get(course_id)
+    if entry is None:
+        return None
+    return {"scores": entry["scores"], "baseline": entry.get("baseline"), "measures": entry.get("measures")}
 
 
 def recalled(profile: dict, course_id: str):

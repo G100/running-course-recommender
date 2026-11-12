@@ -136,6 +136,20 @@ def car_free_match(course: dict, user: dict) -> float:
     return 0.5
 
 
+def measures(course: dict, user: dict) -> dict:
+    """점수를 매기기 전의 측정값 (숫자만, 위치·경로는 없다). 평가와 함께 남겨 나중에 점수식을 새로 찾는 재료로 쓴다."""
+    flow = flow_parts(course)
+    per_km = lambda name: flow[name]["per_km"] if name in flow else None
+    scenery = {k: round(v, 3) for k, v in (course.get("scenery") or {}).items() if isinstance(v, (int, float))}
+    return {
+        "asked_km": resolve_target_distance_km(user), "km": course.get("distance_km"),
+        "route_type": course.get("route_type"), "laps": course.get("laps") or 1,
+        "signals_per_km": per_km("stops"), "turns_per_km": per_km("turns"), "junctions_per_km": per_km("junctions"),
+        "road_mix": dict(course.get("road_mix") or {}), "scenery": scenery,
+        "chosen_scenery": sorted(user.get("environment_tags") or []),
+    }
+
+
 def component_scores(course: dict, user: dict) -> dict:
     """항목별 점수(각 0~1). 가중치를 곱하기 전 값이라, 이 코스가 무엇 때문에 추천됐는지
     보여줄 때와 만족도로 사용자 가중치를 학습할 때 쓴다."""
