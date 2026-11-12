@@ -1061,12 +1061,14 @@ function updateEtaAndArrival(distanceSoFarM, totalM, paceMinPerKm, arriveWithinM
   return false;
 }
 
+const PREVIEW_MAX_MS = 60000;
 function startNavigationSimulated(course){
   enterNavMode();
   simulatedNavigation = true;
   const located = locateStepsOnPath(course.steps, course.path, cumulativeDistances(course.path));
   const total = cumulativeDistances(course.path).slice(-1)[0];
-  const durationMs = Math.max(16000, located.length * 1500);
+  // 안내 하나당 1.5초, 짧아도 16초. 긴 코스는 1분 안에 끝낸다 (하프 코스는 안내가 200개가 넘어 5분 넘게 걸렸다)
+  const durationMs = Math.min(PREVIEW_MAX_MS, Math.max(16000, located.length * 1500));
   document.getElementById('status').textContent = '시뮬레이션 재생 중 (실제 위치 아님 — 페이스를 데모용으로 압축, 안내 문구는 Tmap 실제 응답)' + tmapSummary(course);
   document.getElementById('status').classList.add('live');
   const run = startNavLoop(course, PACE_MIN_PER_KM);
