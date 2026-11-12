@@ -283,12 +283,34 @@ def warm_recent() -> None:
                 graph.way_score(way)
 
 
+MEASURE_MARGIN_M = 300   # 풍경을 잴 때 코스 바깥으로 이만큼은 지도가 있어야 한다 (가장 먼 판정 거리: 해안선 200m)
+
+
+def _covers_with_margin(area, path: list) -> bool:
+    lats, lngs = [p[0] for p in path], [p[1] for p in path]
+    south, west, north, east = area.bbox
+    dlat = MEASURE_MARGIN_M / M_PER_DEG
+    dlng = MEASURE_MARGIN_M / (M_PER_DEG * math.cos(math.radians(max(abs(min(lats)), abs(max(lats))))))
+    return (south <= min(lats) - dlat and max(lats) + dlat <= north
+            and west <= min(lngs) - dlng and max(lngs) + dlng <= east)
+
+
+def _bbox_size(area) -> float:
+    south, west, north, east = area.bbox
+    return (north - south) * (east - west)
+
+
 def cached_area_for_path(path: list):
     """경로 전체를 덮는 받아 둔 Area. 새로 받지는 않는다."""
     if not path:
         return None
     mid = path[len(path) // 2]
     if local_osm.available():
+        # 코스를 짤 때 불러 둔 지도가 코스를 넉넉히 덮으면 그것을 쓴다. 코스 가운데를 중심으로 다른 크기의 지도를
+        # 새로 읽으면 여의도 10km 순환에서 이것만 31초였다. 풍경은 코스 바깥까지 보므로(해안선 200m) 여유를 둔다
+        loaded = [area for area in list(_memory.values()) if area.local and _covers_with_margin(area, path)]
+        if loaded:
+            return min(loaded, key=lambda area: (area._indexes is None, _bbox_size(area)))   # 색인을 이미 만든 것, 작은 것
         lats, lngs = [p[0] for p in path], [p[1] for p in path]
         span_m = max(max(lats) - min(lats), max(lngs) - min(lngs)) * M_PER_DEG
         area = load_area(mid[0], mid[1], radius_m=span_m)

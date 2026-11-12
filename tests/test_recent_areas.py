@@ -122,3 +122,26 @@ def test_without_a_local_map_nothing_is_remembered(monkeypatch, tmp_path):
     assert area_cache.load_area(LAT, LNG, radius_m=900, allow_fetch=False) is None
     import os
     assert not os.path.exists(area_cache.RECENT_PATH)
+
+
+# ── 다 짠 코스의 풍경을 잴 때는 이미 불러 둔 지도를 쓴다 ──
+# 코스를 짠 그 동네 지도가 메모리에 있는데, 코스 가운데를 중심으로 다른 크기의 지도를 처음부터 다시 읽어
+# 여의도 10km 순환에서 이것만 31초였다.
+
+def test_measuring_a_course_uses_a_loaded_map_that_covers_it(local_map):
+    loaded = area_cache.load_area(LAT, LNG, radius_m=4300)   # 10km 순환을 짤 때처럼 넓게 불러 둔 지도
+    local_map.clear()
+    path = [(LAT, LNG), (LAT + 0.012, LNG + 0.012), (LAT, LNG)]   # 그 안의 코스 — 크기만 보면 더 좁은 지도면 된다
+    assert area_cache.cached_area_for_path(path) is loaded
+    assert local_map == [], "이미 불러 둔 지도로 잴 수 있는데 새로 읽었다"
+
+
+def test_a_loaded_map_that_only_barely_covers_the_course_is_not_used(local_map):
+    loaded = area_cache.load_area(LAT, LNG, radius_m=4300)
+    south, west, north, east = loaded.bbox
+    # 지도 가장자리 100m 안까지 가는 코스: 그 바깥 풍경(해안선은 200m까지 본다)을 놓친다 — 새로 불러 잰다
+    edge = north - 100 / area_cache.M_PER_DEG
+    path = [(LAT, LNG), (edge, LNG), (LAT, LNG)]
+    local_map.clear()
+    area = area_cache.cached_area_for_path(path)
+    assert area is not loaded and len(local_map) == 1
