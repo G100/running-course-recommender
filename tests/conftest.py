@@ -39,6 +39,7 @@ def isolated_course_db(tmp_path, monkeypatch):
     monkeypatch.setattr(scenery, "_index_cache", {})
     from src.data_collection import area_cache
     monkeypatch.setattr(area_cache, "_memory", {})
+    monkeypatch.setattr(area_cache, "RECENT_PATH", str(tmp_path / "recent_areas.json"))
     # 로컬 지형 DB도 마찬가지 — 만들어 둔 PC에서만 결과가 달라지면 안 된다
     from src.data_collection import local_osm
     monkeypatch.setattr(local_osm, "DB_PATH", str(tmp_path / "osm_local.sqlite"))

@@ -10,6 +10,7 @@
        백그라운드로 정밀 보강해 DB에 등록해 다음 요청부터는 빨라지게 한다.
 """
 import json
+import threading
 import os
 from contextlib import asynccontextmanager
 from html import escape as html_escape
@@ -73,6 +74,8 @@ async def lifespan(app: FastAPI):
         lines += ["", "  해결: .env.example을 .env로 복사하고 키를 채운 뒤 서버를 다시 시작하세요.",
                   "        (DB에 저장된 코스 추천은 키 없이도 동작합니다)", "=" * 62, ""]
         print("\n".join(lines), flush=True)
+    # 최근 코스를 만든 동네의 지도를 뒤에서 미리 불러 둔다 — 서버는 기다리지 않고 바로 요청을 받는다
+    threading.Thread(target=area_cache.warm_recent, name="warm-recent-areas", daemon=True).start()
     yield
 
 

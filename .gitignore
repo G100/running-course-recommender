@@ -47,3 +47,6 @@ data/elevation_cache.sqlite
 
 # 평가 스크립트(python -m src.evaluate) 실행 결과 — 다시 만들 수 있음
 data/evaluation/
+
+# 최근 코스를 만든 동네 (서버가 다시 켜질 때 그 지도를 미리 불러 둔다) — 러너들이 달린 곳이라 올리지 않는다
+data/recent_areas.json

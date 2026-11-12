@@ -13,6 +13,7 @@
 import json
 import math
 import os
+import threading
 from collections import Counter
 
 import requests
@@ -50,6 +51,13 @@ SELECTORS = [
 ]
 
 _memory = {}
+_building = threading.Lock()   # 같은 동네를 요청과 미리 불러오기가 동시에 읽지 않게
+
+# 최근 코스를 만든 동네(격자 칸)를 기억해 두었다가 서버가 다시 켜질 때 미리 불러 둔다. 처음 요청에서 그 동네
+# 지도를 읽고 길마다 점수를 매기는 데만 5~6초가 들었다(여의도 5km 순환). 코스는 매번 새로 짠다 — 미리 해 두는 건
+# 지도 데이터뿐이다. 남는 건 격자 칸의 위치라 사람의 정확한 위치는 남지 않는다(그래도 커밋하지 않는다).
+RECENT_PATH = os.path.join("data", "recent_areas.json")
+RECENT_KEEP = 6
 
 
 def through_ways(elements: list) -> list:
@@ -201,8 +209,11 @@ def load_area(lat: float, lng: float, radius_m: float = 900, allow_fetch: bool =
         half = max(TIERS[0][0], math.ceil((radius_m / M_PER_DEG + 0.015) * 100) / 100)
         key = f"local_{clat:.4f}_{clng:.4f}_{half:.2f}"
         if key not in _memory:
-            bbox = (clat - half, clng - half, clat + half, clng + half)
-            _memory[key] = Area(bbox, local_osm.load_bbox(bbox), local=True)
+            with _building:
+                if key not in _memory:   # 기다리는 사이 다른 쪽(미리 불러오기)이 읽어 두었다
+                    bbox = (clat - half, clng - half, clat + half, clng + half)
+                    _memory[key] = Area(bbox, local_osm.load_bbox(bbox), local=True)
+        _remember(clat, clng, half)
         return _memory[key]
     for tier in range(_tier_for(radius_m), len(TIERS)):
         half = TIERS[tier][0]
@@ -230,6 +241,46 @@ def load_area(lat: float, lng: float, radius_m: float = 900, allow_fetch: bool =
         json.dump({"bbox": list(bbox), "elements": elements}, f, ensure_ascii=False)
     _memory[key] = Area(bbox, elements)
     return _memory[key]
+
+
+def _recent() -> list:
+    try:
+        with open(RECENT_PATH, encoding="utf-8") as f:
+            entries = json.load(f)
+        return [tuple(e) for e in entries if isinstance(e, list) and len(e) == 3]
+    except (OSError, ValueError):
+        return []   # 없거나 깨졌다 — 기억이 없는 것과 같다
+
+
+def _remember(clat: float, clng: float, half: float) -> None:
+    """이 동네를 가장 최근으로 적는다 (최근 RECENT_KEEP곳만)."""
+    entry = (clat, clng, half)
+    entries = _recent()
+    if entries[:1] == [entry]:
+        return   # 이미 맨 앞이다 — 요청마다 파일을 다시 쓰지 않는다
+    entries = [entry] + [e for e in entries if e != entry]
+    try:
+        os.makedirs(os.path.dirname(RECENT_PATH) or ".", exist_ok=True)
+        with open(RECENT_PATH, "w", encoding="utf-8") as f:
+            json.dump([list(e) for e in entries[:RECENT_KEEP]], f)
+    except OSError:
+        pass   # 못 적어도 코스는 만든다 — 다음에 미리 불러오지 못할 뿐이다
+
+
+def warm_recent() -> None:
+    """기억해 둔 동네의 지도를 읽고 길마다 점수를 매겨 둔다 (서버를 켤 때 뒤에서 한 번)."""
+    if not local_osm.available():
+        return
+    for clat, clng, half in _recent():
+        key = f"local_{clat:.4f}_{clng:.4f}_{half:.2f}"
+        with _building:
+            if key not in _memory:
+                bbox = (clat - half, clng - half, clat + half, clng + half)
+                _memory[key] = Area(bbox, local_osm.load_bbox(bbox), local=True)
+        graph = _memory[key].graph
+        if graph is not None:
+            for way in range(len(graph.ways)):
+                graph.way_score(way)
 
 
 def cached_area_for_path(path: list):

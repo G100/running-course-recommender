@@ -14,6 +14,10 @@ Tmap은 경유지 사이를 최단거리로 잇는다. 경유지 5개만 주면 
 """
 import heapq
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+import requests
 
 from ..api_clients.tmap_pedestrian import extract_path, get_route
 from ..data_collection.enrich import haversine_m
@@ -80,6 +84,22 @@ def needed_waypoints(graph, nodes: list) -> list:
         i = k
 
 
+TMAP_AT_ONCE = 4        # 동시에 묻는 조각 수 (Tmap이 1초에 받는 요청 수 제한을 확인하지 못해 넉넉히 적게)
+TMAP_BUSY_WAIT_S = 1.0  # Tmap이 '요청이 너무 많다'(429)고 거절하면 이만큼 쉬었다가 그 조각만 다시 묻는다
+
+
+def _ask_piece(chunk: list) -> dict:
+    ask = lambda: get_route((chunk[0][1], chunk[0][0]), (chunk[-1][1], chunk[-1][0]), start_name="출발지",
+                            end_name="도착지", waypoints=[(lng, lat) for lat, lng in chunk[1:-1]])
+    for attempt in range(3):
+        try:
+            return ask()
+        except requests.HTTPError as error:
+            if error.response is None or error.response.status_code != 429 or attempt == 2:
+                raise
+            time.sleep(TMAP_BUSY_WAIT_S * (attempt + 1))
+
+
 def stitch(start: tuple, end: tuple, points: list) -> tuple:
     """start → points → end 를 경유지 PER_CALL개씩 끊어 Tmap에 묻고 이어 붙인다. (경로, 호출 수)."""
     stops = [tuple(start)]
@@ -89,17 +109,21 @@ def stitch(start: tuple, end: tuple, points: list) -> tuple:
             stops.append(p)
         elif p == tuple(end):
             stops[-1] = p
-    features, total, calls, i = [], 0, 0, 0
+    chunks, i = [], 0
     while i < len(stops) - 1:
         chunk = stops[i:i + PER_CALL + 2]
-        res = get_route((chunk[0][1], chunk[0][0]), (chunk[-1][1], chunk[-1][0]), start_name="출발지", end_name="도착지",
-                        waypoints=[(lng, lat) for lat, lng in chunk[1:-1]])
-        calls += 1
+        chunks.append(chunk)
+        i += len(chunk) - 1
+    # 조각의 시작·끝이 처음부터 정해져 있으니 동시에 묻는다 (차례로 물으면 5km 순환에서 이것만 7~9초였다).
+    # 답은 온 순서가 아니라 코스 순서대로 잇는다
+    with ThreadPoolExecutor(max_workers=min(TMAP_AT_ONCE, len(chunks)) or 1) as pool:
+        answers = list(pool.map(_ask_piece, chunks))
+    features, total = [], 0
+    for n, res in enumerate(answers):
         _, distance = extract_path(res)
         total += distance
-        first, last = i == 0, i + len(chunk) - 1 >= len(stops) - 1
-        features += [f for f in (_runner_facing(f, first, last) for f in res.get("features", [])) if f]
-        i += len(chunk) - 1
+        features += [f for f in (_runner_facing(f, n == 0, n == len(answers) - 1) for f in res.get("features", [])) if f]
+    calls = len(chunks)
     head = {"geometry": {"type": "Point", "coordinates": [start[1], start[0]]}, "properties": {"totalDistance": total}}
     return {"features": [head] + features}, calls
 

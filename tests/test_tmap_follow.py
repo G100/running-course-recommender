@@ -286,3 +286,81 @@ def test_waypoint_messages_are_dropped_whatever_code_tmap_gives_them():
     point = {"geometry": {"type": "Point", "coordinates": [127.0, 34.0]},
              "properties": {"description": "경유지 후 동백로를 따라 10m 이동", "turnType": 0}}
     assert tmap_follow._runner_facing(point, first=False, last=False) is None
+
+
+from src.api_clients.tmap_pedestrian import extract_path   # noqa: E402 (아래 테스트들에서 쓴다)
+
+
+# ── 나눠 묻는 조각은 동시에 묻는다 ──
+# 5km 순환은 경유지 60~80개라 Tmap에 12~16번 나눠 묻는다. 하나씩 차례로 물으면 그것만 7~9초였다.
+# 조각의 시작·끝은 처음부터 정해져 있으니 기다릴 이유가 없다 — 결과는 같고 시간만 준다.
+
+def _piece_with_line(start, end, start_name="", end_name="", waypoints=None):
+    pts = [(start[1], start[0])] + [(lat, lng) for lng, lat in waypoints or []] + [(end[1], end[0])]
+    return {"features": [
+        {"geometry": {"type": "Point", "coordinates": [pts[0][1], pts[0][0]]}, "properties": {"totalDistance": 100, "turnType": 200}},
+        {"geometry": {"type": "LineString", "coordinates": [[b, a] for a, b in pts]}, "properties": {"roadType": 21}},
+        {"geometry": {"type": "Point", "coordinates": [pts[-1][1], pts[-1][0]]}, "properties": {"description": "도착", "turnType": 201}}]}
+
+
+def test_pieces_are_asked_at_the_same_time_and_joined_in_course_order(monkeypatch):
+    import threading
+    import time as clock
+    lock, state = threading.Lock(), {"now": 0, "most": 0}
+
+    def slow_piece(start, end, start_name="", end_name="", waypoints=None):
+        with lock:
+            state["now"] += 1
+            state["most"] = max(state["most"], state["now"])
+        # 앞 조각일수록 늦게 답한다 — 답이 온 순서가 아니라 코스 순서로 이어야 한다
+        clock.sleep(max(0.05, 0.25 - (start[0] - LAT) / D * 0.004))
+        with lock:
+            state["now"] -= 1
+        return _piece_with_line(start, end, waypoints=waypoints)
+
+    monkeypatch.setattr(tmap_follow, "get_route", slow_piece)
+    points = [(LAT + D * i, LNG) for i in range(1, 49)]          # 48개 → 9번에 나눠 묻는다
+    began = clock.time()
+    route, calls = tmap_follow.stitch((LAT, LNG), (LAT, LNG + D), points)
+    took = clock.time() - began
+    path, _ = extract_path(route)
+    assert calls == 9
+    assert 2 <= state["most"] <= tmap_follow.TMAP_AT_ONCE, f"동시에 {state['most']}개 물었다"
+    assert took < 9 * 0.25 * 0.6, f"차례로 물은 것과 비슷하게 걸렸다 ({took:.2f}초)"
+    lats = [p[0] for p in path[:-1]]   # 마지막 점은 도착점(출발 위도)이다
+    assert lats == sorted(lats), "조각이 코스 순서대로 이어지지 않았다"
+    assert path[0] == [LAT, LNG] and path[-1] == [LAT, LNG + D]
+
+
+def test_a_piece_refused_for_too_many_requests_is_asked_again(monkeypatch):
+    import requests
+    asked = []
+
+    def busy_once(start, end, start_name="", end_name="", waypoints=None):
+        asked.append(start)
+        if len([s for s in asked if s == start]) == 1 and start[1] != LAT:   # 첫 조각 말고는 처음에 한 번씩 거절
+            response = requests.Response()
+            response.status_code = 429
+            raise requests.HTTPError("429 Too Many Requests", response=response)
+        return _piece_with_line(start, end, waypoints=waypoints)
+
+    monkeypatch.setattr(tmap_follow, "get_route", busy_once)
+    monkeypatch.setattr(tmap_follow, "TMAP_BUSY_WAIT_S", 0.01)
+    points = [(LAT + D * i, LNG) for i in range(1, 13)]          # 12개 → 3번에 나눠 묻는다
+    route, calls = tmap_follow.stitch((LAT, LNG), (LAT, LNG + D), points)
+    assert calls == 3, "다시 물은 것은 호출 수에 세지 않는다 (같은 조각이다)"
+    lats = [p[0] for p in extract_path(route)[0][:-1]]
+    assert lats == sorted(lats) and len(asked) == 5
+
+
+def test_a_piece_that_fails_for_another_reason_fails_the_whole_stitch(monkeypatch):
+    import requests
+
+    def broken(start, end, start_name="", end_name="", waypoints=None):
+        if start[1] != LAT:
+            raise requests.ConnectionError("끊김")
+        return _piece_with_line(start, end, waypoints=waypoints)
+
+    monkeypatch.setattr(tmap_follow, "get_route", broken)
+    with pytest.raises(requests.ConnectionError):
+        tmap_follow.stitch((LAT, LNG), (LAT, LNG + D), [(LAT + D * i, LNG) for i in range(1, 13)])
