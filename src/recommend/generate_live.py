@@ -759,33 +759,39 @@ def _fit(area, lat: float, lng: float, target_km: float, waypoints: list, rebuil
         return waypoints, mult
     best, best_gap, best_mult = waypoints, float("inf"), mult
     short = long = None   # (배율, 거리): 목표보다 짧았던 것 중 가장 큰 배율, 길었던 것 중 가장 작은 배율
+    last = None           # 마지막으로 경로가 짜진 배율
     for round_no in range(FIT_ROUNDS):
-        trial = road_graph.route(graph, (lat, lng), (lat, lng), waypoints, night=night)
+        trial = road_graph.route(graph, (lat, lng), (lat, lng), waypoints, night=night) if waypoints else None
         if trial is None:
-            break
-        path, _ = extract_path(trial)
-        actual_km, delivered = _delivered(path)
-        gap = abs(actual_km - target_km) / target_km
-        # 스스로 교차하는 고리는 나중에 버려진다 — 거리가 맞아도 다른 게 없을 때만 쓴다
-        rank = gap + (1.0 if has_self_intersection(delivered) else 0.0)
-        if rank < best_gap:
-            best, best_gap, best_mult = waypoints, rank, mult
-        if gap <= FIT_TOLERANCE or actual_km <= 0 or round_no == FIT_ROUNDS - 1:
-            break   # 마지막 판에는 새 경유지를 만들지 않는다 (만들면 재 보지도 못하고 버린다)
-        if actual_km < target_km and (short is None or mult > short[0]):
-            short = (mult, actual_km)
-        if actual_km > target_km and (long is None or mult < long[0]):
-            long = (mult, actual_km)
-        if short is not None and long is not None and short[0] < long[0]:
-            # 짧은 쪽과 긴 쪽 사이에 답이 있다. 거리가 배율을 따라 뛰므로(막다른 가지·다리) 비율로 고치면
-            # 두 값 사이를 오가기만 한다 — 사이를 반씩 좁힌다
-            mult = (short[0] + long[0]) / 2
+            # 이 배율로는 경유지를 못 잡거나 길이 이어지지 않는다(대전 21.1km: 0.82배에서 경로 없음 → 25.78km로 남았다).
+            # 멈추지 않고 마지막으로 짜진 배율 쪽으로 반만 물러나 본다
+            if last is None or abs(mult - last) < 0.01:
+                break
+            mult = (mult + last) / 2
         else:
-            mult = min(max(mult * target_km / actual_km, 0.4), 2.2)
-        rebuilt = rebuild(mult)
-        if not rebuilt:
-            break
-        waypoints = rebuilt
+            last = mult
+            path, _ = extract_path(trial)
+            actual_km, delivered = _delivered(path)
+            gap = abs(actual_km - target_km) / target_km
+            # 스스로 교차하는 고리는 나중에 버려진다 — 거리가 맞아도 다른 게 없을 때만 쓴다
+            rank = gap + (1.0 if has_self_intersection(delivered) else 0.0)
+            if rank < best_gap:
+                best, best_gap, best_mult = waypoints, rank, mult
+            if gap <= FIT_TOLERANCE or actual_km <= 0:
+                break
+            if actual_km < target_km and (short is None or mult > short[0]):
+                short = (mult, actual_km)
+            if actual_km > target_km and (long is None or mult < long[0]):
+                long = (mult, actual_km)
+            if short is not None and long is not None and short[0] < long[0]:
+                # 짧은 쪽과 긴 쪽 사이에 답이 있다. 거리가 배율을 따라 뛰므로(막다른 가지·다리) 비율로 고치면
+                # 두 값 사이를 오가기만 한다 — 사이를 반씩 좁힌다
+                mult = (short[0] + long[0]) / 2
+            else:
+                mult = min(max(mult * target_km / actual_km, 0.4), 2.2)
+        if round_no == FIT_ROUNDS - 1:
+            break   # 마지막 판에는 새 경유지를 만들지 않는다 (만들면 재 보지도 못하고 버린다)
+        waypoints = rebuild(mult)
     return best, best_mult
 
 

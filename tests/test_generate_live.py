@@ -500,3 +500,34 @@ def test_fitting_again_starts_from_the_scale_the_waypoints_were_made_at(monkeypa
     gl._routed_to_length(SimpleNamespace(graph=object()), 34.0, 127.0, 7.0, [(1.28, 0.0)], rebuild, False, 1.28)
     assert made and min(made) > 1.1, f"1.28배 근처를 뒤져야 한다: {made}"
     assert km_at(made[-1]) == pytest.approx(7.0, rel=gl.FIT_TOLERANCE)
+
+
+class TestFitPastAScaleWithNoRoute:
+    """줄인(늘린) 범위에서 경유지를 못 잡거나 경로가 안 나오면 거기서 멈췄다 — 대전 21.1km 순환이 25.78km(+22%)로
+    남아 한 바퀴를 버리고 두 바퀴로 다시 짜느라 30초가 걸렸다. 마지막으로 짜진 배율 쪽으로 반만 물러나 다시 본다."""
+
+    def _stub(self, monkeypatch, km_at, no_route=lambda m: False, no_waypoints=lambda m: False):
+        from types import SimpleNamespace
+
+        from src.recommend import generate_live as gl
+        square = TestRefitAfterSidewalkCheck()._square
+        monkeypatch.setattr(gl.road_graph, "route", lambda graph, s, e, wps, night=False:
+                            None if no_route(wps[0][0]) else square(km_at(wps[0][0])))
+        rebuild = lambda m: [] if no_waypoints(m) else [(m, 0.0)]
+        return gl, SimpleNamespace(graph=object()), rebuild
+
+    def test_a_scale_with_no_route_is_stepped_back_from(self, monkeypatch):
+        km_at = lambda m: 25.78 * m
+        gl, area, rebuild = self._stub(monkeypatch, km_at, no_route=lambda m: 0.80 < m < 0.83)
+        chosen, mult = gl._fit(area, 36.35, 127.38, 21.1, [(1.0, 0.0)], rebuild, False)
+        assert abs(km_at(mult) - 21.1) / 21.1 <= gl.FIT_TOLERANCE, km_at(mult)
+
+    def test_a_scale_with_no_waypoints_is_stepped_back_from(self, monkeypatch):
+        km_at = lambda m: 25.78 * m
+        gl, area, rebuild = self._stub(monkeypatch, km_at, no_waypoints=lambda m: 0.80 < m < 0.83)
+        chosen, mult = gl._fit(area, 36.35, 127.38, 21.1, [(1.0, 0.0)], rebuild, False)
+        assert abs(km_at(mult) - 21.1) / 21.1 <= gl.FIT_TOLERANCE, km_at(mult)
+
+    def test_when_the_first_waypoints_have_no_route_they_are_given_back(self, monkeypatch):
+        gl, area, rebuild = self._stub(monkeypatch, lambda m: 21.1, no_route=lambda m: True)
+        assert gl._fit(area, 36.35, 127.38, 21.1, [(1.0, 0.0)], rebuild, False) == ([(1.0, 0.0)], 1.0)
