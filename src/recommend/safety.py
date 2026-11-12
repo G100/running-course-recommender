@@ -14,6 +14,7 @@ CCTV도 지자체 공식 데이터가 아니라 OSM 수집분이라 실제보다
 가로등·CCTV 데이터셋을 활용신청하면 같은 구조에 소스만 추가하면 된다.
 """
 from ..data_collection.enrich import haversine_m
+from .point_grid import PointGrid
 
 NEAR_PATH_M = 150          # 경로에서 이 거리 안에 있어야 그 코스와 관련 있다고 본다
 POLICE_NEAR_M = 300        # 이 정도면 바로 달려갈 수 있는 거리
@@ -33,11 +34,11 @@ def _path_length_km(path: list) -> float:
 
 
 def _count_near_path(points: list, path: list, radius_m: float = NEAR_PATH_M) -> int:
-    count = 0
-    for p in points:
-        if any(haversine_m((p["lat"], p["lng"]), (q[0], q[1])) <= radius_m for q in path):
-            count += 1
-    return count
+    """경로에서 radius_m 안에 있는 시설 수. 경로 점을 칸에 담아 가까운 칸만 본다 (모든 점과 견준 것과 같다)."""
+    if not path:
+        return 0
+    near = PointGrid(path, radius_m)
+    return sum(1 for p in points if near.any_near((p["lat"], p["lng"])))
 
 
 def _nearest_distance_m(points: list, path: list) -> float:

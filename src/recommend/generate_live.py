@@ -449,10 +449,12 @@ def retraced_ratio(path: list) -> float:
     cum = cumulative_distances(path)
     total = cum[-1] or 1.0
     retraced = 0.0
+    near = PointGrid(path, SPUR_NEAR_M)   # 앞의 모든 점과 재지 않고 가까운 점만 본다 (point_grid.py)
     for i in range(1, len(path)):
         if cum[i] > total - 150:  # 출발점으로 돌아오는 마지막 구간은 정상
             break
-        if any(haversine_m(path[i], path[j]) < SPUR_NEAR_M for j in range(i) if cum[i] - cum[j] > 150):
+        if any(j < i and cum[i] - cum[j] > 150 and haversine_m(path[i], path[j]) < SPUR_NEAR_M
+               for j in near.near(path[i])):
             retraced += cum[i] - cum[i - 1]
     return retraced / total
 
@@ -609,20 +611,34 @@ def _drop_steps_in_spans(steps: list, path: list, spans: list) -> list:
     return kept
 
 
+CROSSING_CELL_DEG = 0.0005   # 교차 검사 칸 한 변 (약 50m). 선분은 자기가 걸친 칸마다 담긴다
+
+
 def has_self_intersection(path: list[list[float]]) -> bool:
-    """인접 선분과 닫힌 고리의 시작·끝 선분은 제외하고 교차 여부를 검사한다."""
+    """인접 선분과 닫힌 고리의 시작·끝 선분은 제외하고 교차 여부를 검사한다.
+
+    모든 선분 쌍을 견주면 거리가 2배일 때 계산은 4배다(10km 순환 한 건에 500만 번). 두 선분이 교차하면 교차점은
+    두 선분의 범위(최소·최대 좌표) 안에 있으므로, 선분을 그 범위가 걸친 칸마다 담아 두고 같은 칸의 선분끼리만
+    견주면 결과가 같다."""
     if len(path) < 4:
         return False
     points = [tuple(point) for point in path]
     segment_count = len(points) - 1
-    for first in range(segment_count):
-        for second in range(first + 1, segment_count):
-            if second - first <= 1:
-                continue
-            if first == 0 and second == segment_count - 1:
-                continue
-            if _segments_intersect(points[first], points[first + 1], points[second], points[second + 1]):
-                return True
+    cells = {}
+    for k in range(segment_count):
+        (a0, a1), (b0, b1) = points[k], points[k + 1]
+        for r in range(math.floor(min(a0, b0) / CROSSING_CELL_DEG), math.floor(max(a0, b0) / CROSSING_CELL_DEG) + 1):
+            for c in range(math.floor(min(a1, b1) / CROSSING_CELL_DEG), math.floor(max(a1, b1) / CROSSING_CELL_DEG) + 1):
+                cells.setdefault((r, c), []).append(k)
+    seen = set()
+    for members in cells.values():
+        for i, first in enumerate(members):
+            for second in members[i + 1:]:
+                if second - first <= 1 or (first == 0 and second == segment_count - 1) or (first, second) in seen:
+                    continue
+                seen.add((first, second))
+                if _segments_intersect(points[first], points[first + 1], points[second], points[second + 1]):
+                    return True
     return False
 
 

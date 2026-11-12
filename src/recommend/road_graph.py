@@ -51,6 +51,8 @@ REUSE_PENALTY = 4.0          # 이미 지나간 길을 다시 지나면 이만�
 # Tmap이 피한 길(대개 Tmap 지도에 없는 공원·단지 안 보행로). 그 길로 짜면 Tmap이 다른 길로 돌아가서
 # 거리가 늘어난다. 막지는 않는다 — 다른 길이 아예 없으면 그 길이라도 써야 한다
 TMAP_AVOIDED_PENALTY = 4.0
+M_PER_DEG_LAT = 111_320
+LOWER_BOUND = 0.99   # 남은 거리 어림을 1% 줄여 잡는다 — 평면 근사와 위도 차이로 실제보다 커지는 일이 없게
 SNAP_M = 150
 MAIN_SHARE = 0.05   # 동네에서 가장 큰 도로망 조각의 이만큼은 되어야 '이어진 길'로 본다 (강 건너 다른 큰 조각은 쓴다)
 TURN_DEG = 35                # 이보다 크게 꺾이면 좌·우회전으로 안내한다
@@ -321,32 +323,54 @@ class RoadGraph:
 
         used에 든 구간(양방향)은 REUSE_PENALTY만큼 비싸게 쳐서, 순환 코스가 왔던 길로 돌아오지 않게 한다.
         night이면 인적 드문 길을 길게 쳐서 상가·큰길 쪽으로 간다.
+
+        목표까지 남은 직선거리를 더한 값 순서로 본다(A*). 길 비용은 길이에 1 이상의 배율을 곱한 것이라 남은 비용이
+        직선거리보다 작을 수 없으므로, 찾는 길은 사방으로 넓혀 가던 예전과 똑같이 가장 좋은 길이다. 목표 반대쪽을
+        덜 둘러볼 뿐이다 (점수가 똑같은 길이 둘이면 다른 쪽을 고를 수는 있다).
         """
         used = used or set()
+        adjacent, surfaces, avoided = self.adjacent, self.surfaces, self.avoided
+        # 길마다의 배율(점수·길 종류·밤·Tmap이 피한 길)은 한 번 찾는 동안 바뀌지 않는다 — 처음 닿을 때 한 번만 계산한다
+        factors = {}
+
+        def way_factor(way):
+            factor = (1 + DETOUR_FOR_BAD_ROAD * (1 - self.way_score(way))) * SURFACE_PENALTY[surfaces[way]]
+            if night:
+                factor *= NIGHT_PENALTY[self.night_kind(way)]
+            if way in avoided:
+                factor *= TMAP_AVOIDED_PENALTY
+            factors[way] = factor
+            return factor
+
+        # 남은 직선거리: 평면 근사에 LOWER_BOUND를 곱해 실제 거리보다 커지지 않게 한다 (커지면 가장 좋은 길을 놓친다)
+        glat, glng = goal
+        m_lat = M_PER_DEG_LAT * LOWER_BOUND
+        m_lng = m_lat * math.cos(math.radians(glat))
+
+        def remaining(p):
+            return math.hypot((p[0] - glat) * m_lat, (p[1] - glng) * m_lng)
+
         best = {start: 0.0}
         came = {}
-        heap = [(0.0, 0.0, start)]
+        heap = [(remaining(start), 0.0, 0.0, start)]
+        inf = float("inf")
         while heap:
-            cost, length, node = heapq.heappop(heap)
+            _, cost, length, node = heapq.heappop(heap)
             if node == goal:
                 break
-            if cost > best.get(node, float("inf")) or length > max_m:
+            if cost > best.get(node, inf) or length > max_m:
                 continue
-            for neighbour, edge_m, way in self.adjacent[node]:
-                if self.surfaces[way] == BLOCKED:
+            for neighbour, edge_m, way in adjacent[node]:
+                if surfaces[way] == BLOCKED:
                     continue  # 인도가 없다고 확인된 길
-                factor = (1 + DETOUR_FOR_BAD_ROAD * (1 - self.way_score(way))) * SURFACE_PENALTY[self.surfaces[way]]
-                if night:
-                    factor *= NIGHT_PENALTY[self.night_kind(way)]
-                if (node, neighbour) in used or (neighbour, node) in used:
+                factor = factors.get(way) or way_factor(way)
+                if used and ((node, neighbour) in used or (neighbour, node) in used):
                     factor *= REUSE_PENALTY
-                if way in self.avoided:
-                    factor *= TMAP_AVOIDED_PENALTY
                 new_cost = cost + edge_m * factor
-                if new_cost < best.get(neighbour, float("inf")):
+                if new_cost < best.get(neighbour, inf):
                     best[neighbour] = new_cost
                     came[neighbour] = (node, way)
-                    heapq.heappush(heap, (new_cost, length + edge_m, neighbour))
+                    heapq.heappush(heap, (new_cost + remaining(neighbour), new_cost, length + edge_m, neighbour))
         if goal not in came and goal != start:
             return None
         hops = [(goal, None)]
