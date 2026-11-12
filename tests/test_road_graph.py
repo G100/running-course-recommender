@@ -205,3 +205,52 @@ class TestNight:
     def test_secluded_share_is_reported_for_a_daytime_route(self):
         ways, a, b = self._town()
         assert rg.route(_graph(ways), a, b)["secluded_ratio"] == 1.0
+
+
+# ── 숲 속 등산로·임도로는 코스를 짜지 않는다 ──
+# Tmap 보행자 지도에 없는 길이다. 7개 도시에서 Tmap이 탄/피한 길을 세어 보니 숲 속 path는 13%, track은 21%만
+# 탔다(숲 속 보행로는 69%, 그 밖의 길은 81~85%). 그 길로 짜면 Tmap이 산을 돌아가서, 해운대 21km 순환이
+# 설계 20.0km → 실제 33.7km가 됐다.
+
+def _forest_town(trail_kind="path"):
+    """A에서 B로 가는 두 길: 숲을 가로지르는 지름길(약 364m)과, 숲 밖으로 도는 보행로(약 586m)."""
+    a, b = (LAT, LNG), (LAT, LNG + 4 * D)
+    forest = [(LAT - 0.0004, LNG + 0.5 * D), (LAT - 0.0004, LNG + 3.5 * D), (LAT + 0.0004, LNG + 3.5 * D),
+              (LAT + 0.0004, LNG + 0.5 * D), (LAT - 0.0004, LNG + 0.5 * D)]
+    return [
+        _way(1, [a, (LAT, LNG + 2 * D), b], highway=trail_kind),
+        _way(2, [a, (LAT + D, LNG)], highway="footway"),
+        _way(3, [(LAT + D, LNG), (LAT + D, LNG + 2 * D), (LAT + D, LNG + 4 * D)], highway="footway"),
+        _way(4, [(LAT + D, LNG + 4 * D), b], highway="footway"),
+        _way(8, forest, landuse="forest"),
+    ], a, b
+
+
+@pytest.mark.parametrize("kind", ["path", "track"])
+def test_trails_inside_a_forest_are_not_used(kind):
+    ways, a, b = _forest_town(kind)
+    path, distance = extract_path(rg.route(_graph(ways), a, b))
+    assert distance == pytest.approx(586, rel=0.05), "숲 속 지름길로 갔다"
+    assert all(p[0] >= LAT for p in path)
+
+
+def test_paved_walkways_inside_a_forest_are_still_used():
+    ways, a, b = _forest_town("footway")
+    _, distance = extract_path(rg.route(_graph(ways), a, b))
+    assert distance == pytest.approx(364, rel=0.05), "숲 속 보행로는 Tmap도 안내하는 길이다"
+
+
+def test_paths_outside_a_forest_are_still_used():
+    ways, a, b = _forest_town("path")
+    ways = [w for w in ways if w["id"] != 8]   # 숲이 없다 — 강변·공원의 path는 그대로 쓴다
+    _, distance = extract_path(rg.route(_graph(ways), a, b))
+    assert distance == pytest.approx(364, rel=0.05)
+
+
+def test_a_forest_trail_tmap_has_ridden_before_is_still_used():
+    from src.recommend.tmap_follow import way_id
+    ways, a, b = _forest_town("path")
+    trail = [(g["lat"], g["lon"]) for g in ways[0]["geometry"]]
+    graph = rg.RoadGraph(ways, build_indexes({"all": ways}), rg.PRIOR, ridden={way_id(trail)})
+    _, distance = extract_path(rg.route(graph, a, b))
+    assert distance == pytest.approx(364, rel=0.05), "Tmap이 탄 적 있는 길은 Tmap 지도에 있는 길이다"

@@ -28,6 +28,7 @@ from ..data_collection.scenery import THRESHOLDS as SCENERY_THRESHOLDS
 from ..data_collection.enrich import haversine_m
 from ..data_collection.osm_overpass import OverpassUnavailable, post_overpass_query
 from . import road_graph, sidewalk
+from .point_grid import PointGrid
 from .flow import junctions_per_km
 from .safety import safety_index, score_components
 from .step_position import assign_positions, cumulative_distances
@@ -398,7 +399,8 @@ def _is_out_and_back(segment: list) -> bool:
     outbound, inbound = segment[: far + 1], segment[far:]
     if len(inbound) < 2:
         return False
-    overlapping = sum(1 for q in inbound if any(haversine_m(q, o) <= SPUR_NEAR_M for o in outbound))
+    near_outbound = PointGrid(outbound, SPUR_NEAR_M)
+    overlapping = sum(1 for q in inbound if near_outbound.any_near(q))
     return overlapping / len(inbound) >= SPUR_OVERLAP
 
 
@@ -420,13 +422,15 @@ def _prune_with_spans(path: list) -> tuple:
     spans = []
     i = 0
     last = len(path) - 1
+    # 같은 자리로 돌아오는 지점만 가지의 끝이 될 수 있다. 모든 점을 하나하나 재지 않고 가까운 점만 찾는다
+    # (긴 코스에서 여기가 요청 시간의 대부분이었다 — point_grid.py)
+    near = PointGrid(path, SPUR_NEAR_M)
     while i < last:
         jump = None
-        # 출발점으로 돌아오는 마지막 지점은 순환의 끝이지 가지가 아니므로 제외한다
-        for j in range(last - 1, i + 1, -1):
-            if cum[j] - cum[i] < SPUR_MIN_LENGTH_M:
-                break
-            if haversine_m(path[i], path[j]) <= SPUR_NEAR_M and _is_out_and_back(path[i : j + 1]):
+        # 출발점으로 돌아오는 마지막 지점은 순환의 끝이지 가지가 아니므로 제외한다. 가장 멀리 간 뒤 돌아온 곳부터 본다
+        back_here = (j for j in near.near(path[i]) if i + 1 < j < last and cum[j] - cum[i] >= SPUR_MIN_LENGTH_M)
+        for j in sorted(back_here, reverse=True):
+            if _is_out_and_back(path[i : j + 1]):
                 jump = j
                 break
         if jump is not None:

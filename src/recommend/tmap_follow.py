@@ -19,6 +19,7 @@ from ..api_clients.tmap_pedestrian import extract_path, get_route
 from ..data_collection.enrich import haversine_m
 from . import sidewalk
 from .flow import junctions_per_km
+from .point_grid import PointGrid
 
 MATCH_M = 35        # 이만큼 안이면 같은 길 (넓은 길은 맞은편 인도까지 30m 가까이 된다)
 PER_CALL = 5        # Tmap passList 한도
@@ -138,7 +139,8 @@ def _share_near(a: list, b: list) -> float:
     pts, ref = _dense(a), _dense(b, 10)
     if not pts or not ref:
         return 0.0
-    return sum(1 for p in pts if min(haversine_m(p, q) for q in ref) <= MATCH_M) / len(pts)
+    near_ref = PointGrid(ref, MATCH_M)   # 모든 점을 모든 점과 재지 않는다 (point_grid.py)
+    return sum(1 for p in pts if near_ref.any_near(p)) / len(pts)
 
 
 def check(route_json: dict, plan_path: list, graph=None) -> dict:
@@ -332,6 +334,14 @@ def tmap_avoided() -> set:
         return set()
     with sidewalk._open() as db:
         return {way for way, in db.execute("SELECT way FROM tmap_ways WHERE avoided > 0 AND ridden = 0")}
+
+
+def tmap_ridden() -> set:
+    """Tmap이 한 번이라도 탄 길들 — Tmap 지도에 있는 길이다."""
+    if not os.path.exists(sidewalk.FACTS_PATH):
+        return set()
+    with sidewalk._open() as db:
+        return {way for way, in db.execute("SELECT way FROM tmap_ways WHERE ridden > 0")}
 
 
 def _learn(graph, nodes: list, tmap_path: list) -> None:

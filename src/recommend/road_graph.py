@@ -112,6 +112,11 @@ NO_SIDEWALK = ("no", "none")
 #           흐름이 끊기는 구간이다. 다른 길이 훨씬 멀 때만 지난다.
 SURFACE_PENALTY = {"walkway": 1.0, "sidewalk": 1.0, "shared": 2.0, "carroad": 3.0, "alley": 4.0, "steps": 3.0}
 BLOCKED = "mixed"
+# 숲 속 등산로·임도로는 코스를 짜지 않는다 — Tmap 보행자 지도에 없는 길이다. 7개 도시에서 Tmap이 탄/피한 길을
+# 세어 보니 숲 속 path는 13%, track은 21%만 탔다(숲 속 보행로 69%, 그 밖의 길 81~85%). 그 길로 짜면 Tmap이
+# 산을 돌아가서 거리가 크게 틀린다(해운대 21km 순환: 설계 20.0km → 실제 33.7km). Tmap이 한 번이라도 탄 길은 쓴다.
+FOREST_TRAILS = {"path", "track"}
+FOREST_TRAIL_NEAR_M = 30
 
 
 def is_alley(tags: dict) -> bool:
@@ -151,11 +156,14 @@ def _walkable(tags: dict) -> bool:
 class RoadGraph:
     """한 동네의 도로망. 꼭짓점이 곧 노드다(OSM에서 이어진 길은 좌표를 공유한다)."""
 
-    def __init__(self, elements: list, indexes: dict, model: dict = None, facts: dict = None, avoided: set = None):
+    def __init__(self, elements: list, indexes: dict, model: dict = None, facts: dict = None, avoided: set = None,
+                 ridden: set = None):
         from . import sidewalk
-        from .tmap_follow import tmap_avoided, way_id
+        from .tmap_follow import tmap_avoided, tmap_ridden, way_id
         facts = sidewalk.load_facts() if facts is None else facts
         avoided_keys = tmap_avoided() if avoided is None else avoided
+        ridden_keys = tmap_ridden() if ridden is None else ridden
+        forest = indexes.get("forest")
         self.avoided = set()                 # Tmap이 피한 길 번호
         self.indexes = indexes
         self.model = model or load_model()
@@ -170,6 +178,9 @@ class RoadGraph:
             if element.get("type") != "way" or not _walkable(tags):
                 continue
             points = [(g["lat"], g["lon"]) for g in element.get("geometry", [])]
+            if (tags.get("highway") in FOREST_TRAILS and points and forest is not None and forest.size
+                    and forest.near(*points[len(points) // 2], FOREST_TRAIL_NEAR_M) and way_id(points) not in ridden_keys):
+                continue
             way = len(self.ways)
             self.ways.append((tags, points))
             kind = surface(tags)
