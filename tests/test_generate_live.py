@@ -382,3 +382,121 @@ def test_one_way_end_on_an_island_crosses_the_bridge():
     assert end is not None, "섬에서 도착점을 못 찾았다"
     km = extract_path(rg.route(graph, (lat, lng), end))[1] / 1000
     assert abs(km - 2.5) / 2.5 <= 0.05, km
+
+
+class TestRefitAfterSidewalkCheck:
+    """인도 확인이 길을 바꾸면 거리를 다시 맞춘다. 맞춘 설계(6.85km)에서 인도가 확인되지 않은 큰길을 빼고
+    다시 짰더니 6.36km(-9%)가 됐다 (광주 7km 순환). 여수는 7.37km가 12.53km가 됐다."""
+
+    def _square(self, km):
+        from src.recommend.generate_live import _offset
+        side = km * 1000 / 4
+        path = [(34.0, 127.0)]
+        for bearing in (90, 180, 270, 0):
+            n = int(side // 25)
+            start = path[-1]
+            path += [_offset(start[0], start[1], bearing, side * k / n) for k in range(1, n + 1)]
+        return {"router": "local", "no_car_lanes": True,
+                "features": [{"geometry": {"type": "LineString", "coordinates": [[b, a] for a, b in path]}}]}
+
+    def _stub(self, monkeypatch, lengths):
+        """_route가 차례로 lengths 길이의 코스를 준다. 다시 맞춘 횟수를 센다."""
+        from src.recommend import generate_live as gl
+        asked, refits = list(lengths), []
+        monkeypatch.setattr(gl, "_route", lambda area, start, end, waypoints, night=False: self._square(asked.pop(0)))
+        monkeypatch.setattr(gl, "_fit", lambda area, lat, lng, km, wps, rebuild, night, mult=1.0: (refits.append(wps) or [(100 + len(refits), 0)], mult))   # 매번 다른 경유지
+        return gl, refits
+
+    def _km(self, gl, route):
+        from src.api_clients.tmap_pedestrian import extract_path
+        return gl._delivered(extract_path(route)[0])[0]
+
+    def test_a_course_the_sidewalk_check_made_short_is_fitted_again(self, monkeypatch):
+        gl, refits = self._stub(monkeypatch, [6.36, 7.05])
+        route = gl._routed_to_length(object(), 34.0, 127.0, 7.0, [(1, 1)], lambda m: [(m, m)], False)
+        assert len(refits) == 1 and self._km(gl, route) == pytest.approx(7.05, abs=0.02)
+
+    def test_a_course_still_on_length_is_not_fitted_again(self, monkeypatch):
+        gl, refits = self._stub(monkeypatch, [7.1])
+        route = gl._routed_to_length(object(), 34.0, 127.0, 7.0, [(1, 1)], lambda m: [(m, m)], False)
+        assert refits == [] and self._km(gl, route) == pytest.approx(7.1, abs=0.02)
+
+    def test_the_closest_try_is_kept_when_fitting_again_does_not_help(self, monkeypatch):
+        gl, refits = self._stub(monkeypatch, [6.6, 8.4, 9.0])
+        route = gl._routed_to_length(object(), 34.0, 127.0, 7.0, [(1, 1)], lambda m: [(m, m)], False)
+        assert len(refits) == gl.REFIT_ROUNDS and self._km(gl, route) == pytest.approx(6.6, abs=0.02)
+
+    def test_without_a_way_to_rebuild_the_course_is_used_as_it_is(self, monkeypatch):
+        gl, refits = self._stub(monkeypatch, [6.36])
+        route = gl._routed_to_length(object(), 34.0, 127.0, 7.0, [(1, 1)], None, False)
+        assert refits == [] and self._km(gl, route) == pytest.approx(6.36, abs=0.02)
+
+    def test_a_course_on_car_roads_is_not_fitted_again(self, monkeypatch):
+        """차도를 지나는 코스는 어차피 버린다 — 다시 맞출 필요가 없다."""
+        gl, refits = self._stub(monkeypatch, [6.0])
+        real = gl._route
+        monkeypatch.setattr(gl, "_route", lambda *a, **k: dict(real(*a, **k), no_car_lanes=False))
+        route = gl._routed_to_length(object(), 34.0, 127.0, 7.0, [(1, 1)], lambda m: [(m, m)], False)
+        assert refits == [] and route["no_car_lanes"] is False
+
+
+class TestFitAcrossAJump:
+    """거리는 경유지 범위(배율)에 매끄럽게 따라오지 않는다 — 막다른 가지 하나, 다리 하나로 1km씩 뛴다
+    (광주 7km: 0.97배 6.07km, 1.12배 8.22km). '목표/실제' 비율로만 고치면 두 값 사이를 오가기만 했다."""
+
+    def _stub(self, monkeypatch, km_at):
+        from types import SimpleNamespace
+
+        from src.recommend import generate_live as gl
+        tried = []
+
+        def route(graph, start, end, waypoints, night=False):
+            mult = waypoints[0][0]
+            tried.append(mult)
+            return TestRefitAfterSidewalkCheck()._square(km_at(mult))
+        monkeypatch.setattr(gl.road_graph, "route", route)
+        return gl, SimpleNamespace(graph=object()), tried
+
+    def _km(self, gl, km_at, waypoints):
+        return km_at(waypoints[0][0])
+
+    def test_a_length_just_below_the_jump_is_found(self, monkeypatch):
+        km_at = lambda m: 7.6 * m if m < 0.9 else 9.5 * m      # 0.894~0.9배에서만 3% 안 (6.79~6.84km)
+        gl, area, tried = self._stub(monkeypatch, km_at)
+        chosen = gl._fit_length(area, 34.0, 127.0, 7.0, [(1.0, 0.0)], lambda m: [(m, 0.0)], False)
+        assert abs(km_at(chosen[0][0]) - 7.0) / 7.0 <= gl.FIT_TOLERANCE, (tried, km_at(chosen[0][0]))
+
+    def test_the_last_waypoints_made_are_also_tried(self, monkeypatch):
+        """마지막 판에 만든 경유지를 재 보지도 않고 버렸다 (광주: 버려진 것이 6.88km, 고른 것은 6.36km)."""
+        gl, area, tried = self._stub(monkeypatch, lambda m: 7.6 * m if m < 0.9 else 9.5 * m)
+        made = []
+        gl._fit_length(area, 34.0, 127.0, 7.0, [(1.0, 0.0)], lambda m: made.append(m) or [(m, 0.0)], False)
+        assert set(made) <= set(tried), "만든 경유지는 모두 짜 본다"
+
+
+def test_fitting_again_stops_when_it_gives_the_same_waypoints(monkeypatch):
+    """도로망이 그대로면 거리 맞추기는 같은 경유지를 준다 — 같은 길을 다시 짤 필요가 없다."""
+    t = TestRefitAfterSidewalkCheck()
+    from src.recommend import generate_live as gl
+    lengths, refits = [6.36, 6.5, 6.6], []
+    monkeypatch.setattr(gl, "_route", lambda area, start, end, waypoints, night=False: t._square(lengths.pop(0)))
+    monkeypatch.setattr(gl, "_fit", lambda area, lat, lng, km, wps, rebuild, night, mult=1.0: (refits.append(wps) or [(9, 9)], mult))
+    gl._routed_to_length(object(), 34.0, 127.0, 7.0, [(1, 1)], lambda m: [(m, m)], False)
+    assert len(refits) == 2 and lengths == [6.6], "두 번째로 맞춘 경유지가 첫 번째와 같으면 짜지 않는다"
+
+
+def test_fitting_again_starts_from_the_scale_the_waypoints_were_made_at(monkeypatch):
+    """처음 맞출 때 1.28배로 만든 경유지를 다시 맞출 때 1배로 알았다 — 0.94~1배만 뒤지다 끝났다 (수원 광교 7km)."""
+    t = TestRefitAfterSidewalkCheck()
+    from types import SimpleNamespace
+    from src.recommend import generate_live as gl
+    made = []
+    km_at = lambda m: 5.82 * m          # 인도 확인이 큰길을 빼서 도로망에서도 1.28배가 7.45km가 됐다 (1.2배쯤에서 7km)
+    monkeypatch.setattr(gl.road_graph, "route", lambda graph, s, e, wps, night=False: t._square(km_at(wps[0][0])))
+    lengths = [7.45]                    # 인도 확인이 1.28배 경유지로 짠 7.0km를 7.45km로 바꿨다
+    monkeypatch.setattr(gl, "_route", lambda area, s, e, wps, night=False:
+                        t._square(lengths.pop(0) if lengths else km_at(wps[0][0])))
+    rebuild = lambda m: made.append(m) or [(m, 0.0)]
+    gl._routed_to_length(SimpleNamespace(graph=object()), 34.0, 127.0, 7.0, [(1.28, 0.0)], rebuild, False, 1.28)
+    assert made and min(made) > 1.1, f"1.28배 근처를 뒤져야 한다: {made}"
+    assert km_at(made[-1]) == pytest.approx(7.0, rel=gl.FIT_TOLERANCE)

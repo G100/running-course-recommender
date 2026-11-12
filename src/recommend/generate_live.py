@@ -713,7 +713,7 @@ def sample_elevation_gains(paths: list, n: int = 20) -> list:
 
 
 FIT_TOLERANCE = 0.03   # 목표 거리와 이 비율 안이면 맞은 것으로 본다 (나가는 코스는 5% 안이어야 한다)
-FIT_ROUNDS = 5         # 한 번에 1초도 안 걸린다 (외부 호출 없음)
+FIT_ROUNDS = 8         # 한 번에 1초도 안 걸린다 (외부 호출 없음). 거리가 뛰는 곳은 사이를 좁혀 가느라 판이 더 든다
 
 
 def _delivered(path: list) -> tuple:
@@ -725,18 +725,25 @@ def _delivered(path: list) -> tuple:
 
 
 def _fit_length(area, lat: float, lng: float, target_km: float, waypoints: list, rebuild, night: bool) -> list:
+    return _fit(area, lat, lng, target_km, waypoints, rebuild, night)[0]
+
+
+def _fit(area, lat: float, lng: float, target_km: float, waypoints: list, rebuild, night: bool,
+         mult: float = 1.0) -> tuple:
     """경유지를 실제 거리에 맞게 다시 잡는다.
 
     경유지는 직선거리로 길이를 추정해 잡기 때문에, 실제 길은 지형·좋은 길 우회에 따라 목표와 10~30%
     어긋났다(대전 3km 요청에 2.0km·5.27km). 도로망이 있으면 경로를 직접 짜 보는 데 1초도 안 걸리므로,
     짜 본 거리를 보고 경유지 범위를 키우거나 줄여서 다시 잡는다. 외부 호출은 없다(인도 확인은 마지막에 한 번).
-    rebuild(배율)은 범위를 그 배율로 바꾼 경유지를 준다. 가장 목표에 가까웠던 경유지를 돌려준다.
+    rebuild(배율)은 범위를 그 배율로 바꾼 경유지를 준다. waypoints는 mult배로 만든 것이다.
+    가장 목표에 가까웠던 경유지와 그 배율을 돌려준다.
     """
     graph = area.graph if area is not None else None
     if graph is None or not waypoints:
-        return waypoints
-    best, best_gap, mult = waypoints, float("inf"), 1.0
-    for _ in range(FIT_ROUNDS):
+        return waypoints, mult
+    best, best_gap, best_mult = waypoints, float("inf"), mult
+    short = long = None   # (배율, 거리): 목표보다 짧았던 것 중 가장 큰 배율, 길었던 것 중 가장 작은 배율
+    for round_no in range(FIT_ROUNDS):
         trial = road_graph.route(graph, (lat, lng), (lat, lng), waypoints, night=night)
         if trial is None:
             break
@@ -746,14 +753,56 @@ def _fit_length(area, lat: float, lng: float, target_km: float, waypoints: list,
         # 스스로 교차하는 고리는 나중에 버려진다 — 거리가 맞아도 다른 게 없을 때만 쓴다
         rank = gap + (1.0 if has_self_intersection(delivered) else 0.0)
         if rank < best_gap:
-            best, best_gap = waypoints, rank
-        if gap <= FIT_TOLERANCE or actual_km <= 0:
-            break
-        mult = min(max(mult * target_km / actual_km, 0.4), 2.2)
+            best, best_gap, best_mult = waypoints, rank, mult
+        if gap <= FIT_TOLERANCE or actual_km <= 0 or round_no == FIT_ROUNDS - 1:
+            break   # 마지막 판에는 새 경유지를 만들지 않는다 (만들면 재 보지도 못하고 버린다)
+        if actual_km < target_km and (short is None or mult > short[0]):
+            short = (mult, actual_km)
+        if actual_km > target_km and (long is None or mult < long[0]):
+            long = (mult, actual_km)
+        if short is not None and long is not None and short[0] < long[0]:
+            # 짧은 쪽과 긴 쪽 사이에 답이 있다. 거리가 배율을 따라 뛰므로(막다른 가지·다리) 비율로 고치면
+            # 두 값 사이를 오가기만 한다 — 사이를 반씩 좁힌다
+            mult = (short[0] + long[0]) / 2
+        else:
+            mult = min(max(mult * target_km / actual_km, 0.4), 2.2)
         rebuilt = rebuild(mult)
         if not rebuilt:
             break
         waypoints = rebuilt
+    return best, best_mult
+
+
+REFIT_ROUNDS = 2   # 인도 확인 뒤 거리를 다시 맞추는 횟수 (새로 지나게 된 큰길을 Tmap에 물을 수 있어 늘리지 않는다)
+
+
+def _routed_to_length(area, lat: float, lng: float, target_km: float, waypoints: list, rebuild, night: bool,
+                      mult: float = 1.0) -> dict:
+    """순환 경로를 짜고(인도 확인까지), 인도 확인이 길을 바꿔 거리가 틀어졌으면 거리를 다시 맞춘다.
+
+    거리 맞추기(_fit_length)는 도로망만 보고 3% 안으로 맞추지만, 그 뒤 인도 확인(sidewalk.confirm)이 인도가
+    확인되지 않은 큰길을 빼고 다시 짜면서 거리가 바뀌었다(광주 7km 순환 6.85 → 6.36km, 여수 7.37 → 12.53km).
+    인도 확인은 뺀 길을 도로망에 남기므로, 다시 맞추면 그 길을 피한 채로 맞춘다. 가장 목표에 가까운 것을 준다.
+    차도를 지나는 경로(no_car_lanes=False)는 호출 쪽이 버리므로 그대로 돌려준다.
+    waypoints는 rebuild(mult)로 만든 것이다 — 다시 맞출 때 그 배율에서 시작한다(1배로 알면 엉뚱한 범위를 뒤졌다).
+    """
+    route = _route(area, (lat, lng), (lat, lng), waypoints, night)
+    if rebuild is None or route is None or route.get("router") != "local":
+        return route
+    gap = lambda r: abs(_delivered(extract_path(r)[0])[0] - target_km) / target_km
+    best = route
+    for _ in range(REFIT_ROUNDS):
+        if route.get("no_car_lanes") is False or gap(route) <= FIT_TOLERANCE:
+            break
+        fitted, mult = _fit(area, lat, lng, target_km, waypoints, rebuild, night, mult)
+        if fitted == waypoints:
+            break   # 같은 경유지가 나왔다 — 다시 짜도 같은 길이다
+        waypoints = fitted
+        route = _route(area, (lat, lng), (lat, lng), waypoints, night)
+        if route is None:
+            break
+        if route.get("no_car_lanes") is not False and gap(route) < gap(best):
+            best = route
     return best
 
 
@@ -794,18 +843,19 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
 
     not_sidewalk_only = False
     for offset in offsets:
+        rebuild, mult = None, 1.0
         if route_type == "loop":
             waypoints = scenic_vertices_for_length(area, tags, lat, lng, target_distance_km * radius_scale, offset)
             if waypoints:
                 rebuild = lambda mult, offset=offset: scenic_vertices_for_length(
                     area, tags, lat, lng, target_distance_km * radius_scale * mult, offset)
-                waypoints = _fit_length(area, lat, lng, target_distance_km, waypoints, rebuild, night)
+                waypoints, mult = _fit(area, lat, lng, target_distance_km, waypoints, rebuild, night)
             elif ways:
                 waypoints = pick_land_vertices(lat, lng, target_distance_km, ways, offset, radius_scale, area, night)
                 if waypoints:
                     rebuild = lambda mult, offset=offset: pick_land_vertices(
                         lat, lng, target_distance_km, ways, offset, radius_scale * mult, area, night)
-                    waypoints = _fit_length(area, lat, lng, target_distance_km, waypoints, rebuild, night)
+                    waypoints, mult = _fit(area, lat, lng, target_distance_km, waypoints, rebuild, night)
                 if not waypoints:
                     # 주변 길을 알고 있는데 길 있는 방향이 부족하다 = 이 반경·방향으론 순환이 안 나온다.
                     # 계산 좌표로 억지로 요청하면 바다 같은 곳이 경유지가 되어 Tmap이 400을 준다.
@@ -818,7 +868,7 @@ def generate_loop_course(lat: float, lng: float, target_distance_km: float, tags
                 )
                 waypoints = snap_vertices(vertices) if snap_to_osm and ways is None else vertices
             try:
-                route = _route(area, (lat, lng), (lat, lng), waypoints, night)
+                route = _routed_to_length(area, lat, lng, target_distance_km, waypoints, rebuild, night, mult)
             except requests.HTTPError as error:
                 logger.debug("이 경유지 조합은 Tmap이 거절했습니다: %s", error)
                 continue
