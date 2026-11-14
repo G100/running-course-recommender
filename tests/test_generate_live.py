@@ -359,6 +359,33 @@ class TestOneWayDistanceFit:
         assert abs(total_km - 3.0) / 3.0 <= 0.03, total_km
 
 
+def test_waypoints_behind_a_wall_are_not_picked():
+    """광주 용봉동(전남대) 1km 순환: 경유지가 출발점에서 직선 61~87m였는데 걸어서는 585m·600m+였다(건물·담장 너머).
+    직선거리로만 고르니 배율을 아무리 줄여도 코스가 2km 아래로 안 내려갔다. 걸어서 너무 먼 곳은 경유지로 잡지 않는다."""
+    from types import SimpleNamespace
+
+    from src.recommend import generate_live as gl, road_graph as rg
+
+    def way(wid, pts):
+        return {"type": "way", "id": wid, "geometry": [{"lat": a, "lon": b} for a, b in pts], "tags": {"highway": "footway"}}
+
+    lat, lng = 34.0, 127.0
+    west, east = lng - 0.003, lng + 0.003
+    here = [(lat, west), (lat, lng), (lat, east)]                                   # 출발점이 있는 길
+    behind = [(lat + 0.0008, west), (lat + 0.0008, east)]                          # 북쪽 90m: 담장 너머 (양 끝으로만 이어짐)
+    ends = [[(lat, west), (lat + 0.0008, west)], [(lat, east), (lat + 0.0008, east)]]
+    front = [(lat - 0.0008, west), (lat - 0.0008, lng), (lat - 0.0008, east)]      # 남쪽 90m: 가운데 골목으로 바로 이어짐
+    alley = [(lat, lng), (lat - 0.0008, lng)]
+    ways = [way(1, here), way(2, behind), way(3, ends[0]), way(4, ends[1]), way(5, front), way(6, alley)]
+    graph = rg.RoadGraph(ways, {}, rg.PRIOR, facts={}, avoided=set())
+    area = SimpleNamespace(graph=graph, roads=ways, indexes={}, water=SimpleNamespace(crosses=lambda a, b: False))
+
+    assert gl._walk_detoured(area, lat, lng, (lat + 0.0008, lng + 0.00136)), "담장 너머: 직선 150m, 걸어서 500m+"
+    assert not gl._walk_detoured(area, lat, lng, (lat - 0.0008, lng + 0.00136)), "골목으로 바로: 걸어서 약 210m"
+    vertices = gl.pick_land_vertices(lat, lng, 1.0, ways, area=area)
+    assert vertices and all(v[0] < lat + 0.0004 for v in vertices), f"담장 너머 길에 경유지를 잡았다: {vertices}"
+
+
 def test_one_way_end_on_an_island_crosses_the_bridge():
     """여의도처럼 섬에서 출발하면 직선으로 2km를 그으면 전부 강을 건너 도착점을 못 찾았다.
     도착점은 실제 길로 걸어서 그 거리만큼 가는 곳에서 고른다 — 다리도 길이다."""

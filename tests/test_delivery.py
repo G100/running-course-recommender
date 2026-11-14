@@ -88,6 +88,17 @@ def test_when_the_tmap_daily_limit_is_used_up_the_runner_is_told_why(monkeypatch
     assert main._deliver_on_tmap(_plan(TARGET), TARGET, "loop", lambda km: None)["tmap_unchecked"] == "daily_limit"
 
 
+def test_a_route_tmap_shrinks_to_a_stub_is_not_given(monkeypatch):
+    """광주 용봉동: 0.2km 순환 설계를 Tmap으로 이으니 0.02km(한 지점 왕복)가 됐다. 코스가 작아 '설계를 다 따라갔다'는
+    확인도 통과했다. 이은 길이 설계의 절반도 안 되면 다른 코스다 — 쓰지 않고 설계를 주되 그렇다고 알린다."""
+    follow, calls = _tmap_follow(stretch=0.1)
+    monkeypatch.setattr(main, "_follow_with_tmap", follow)
+    plan = _plan(TARGET)
+    given = main._deliver_on_tmap(plan, TARGET, "loop", lambda km: pytest.fail("줄어든 비율로 다시 짜지 않는다"))
+    assert given["path"] == plan["path"] and given["tmap_unchecked"] == "mismatch"
+    assert len(calls) == 1
+
+
 def test_a_course_joined_on_tmap_is_not_marked_unchecked(monkeypatch):
     follow, _ = _tmap_follow(1.0)
     monkeypatch.setattr(main, "_follow_with_tmap", follow)

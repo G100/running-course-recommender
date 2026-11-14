@@ -1622,7 +1622,8 @@ function renderCourseOptions(){
 // 인도·횡단보도로 이어지는지와 회전 안내는 Tmap이 확인한 것이 아니다.
 function uncheckedText(course){
   if (!course || course.tmap || course._tmap) return null;
-  const why = { daily_limit: '오늘 Tmap 길 확인 횟수를 다 써서', unavailable: '지금 Tmap에 연결되지 않아' }[course.tmap_unchecked]
+  const why = { daily_limit: '오늘 Tmap 길 확인 횟수를 다 써서', unavailable: '지금 Tmap에 연결되지 않아',
+                mismatch: 'Tmap 길로 이으면 코스 모양이 크게 달라져서' }[course.tmap_unchecked]
     || (course._deliverFailed || course._tmapFailed ? 'Tmap에 연결되지 않아' : null);
   if (!why) return null;
   return `${why} 이 코스는 Tmap으로 길을 확인하지 못했어요. 거리는 맞췄지만 인도·횡단보도 안내가 틀릴 수 있으니 달리면서 길을 살펴 주세요.`;

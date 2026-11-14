@@ -129,10 +129,38 @@ def test_a_one_lap_loop_far_from_the_asked_distance_counts_as_not_made():
 
 def test_when_no_number_of_laps_works_the_one_lap_attempt_is_kept():
     def generate(km, wanted):
-        return [loop_course(km * 0.7)]   # 몇 km든 30% 짧게 나온다
+        return [loop_course(14.7)]   # 몇 km를 달라고 해도 14.7km 순환만 나온다 (몇 바퀴를 돌아도 21km와 멀다)
 
     found, count = main._loop_or_laps(generate, 21.0, set())
     assert count == 1 and found[0]["distance_km"] == pytest.approx(14.7)
+
+
+def test_a_loop_already_made_is_tried_with_more_laps_before_making_new_ones():
+    """광주 용봉동 1km: 1km를 달라면 0.48km·1.93km 순환만 나온다. 0.48km × 2바퀴 = 0.96km로 요청과 4% 차이인데,
+    예전에는 '1km ÷ 바퀴 수'로 새로 만든 것만 봐서 이걸 놓치고 0.2km × 5바퀴(블록 하나 돌기)까지 내려갔다."""
+    asked = []
+    sizes = {1.0: [0.48, 1.93], 0.5: [0.57, 2.04], 0.333: [0.18, 0.57, 2.04], 0.25: [0.18, 0.57], 0.2: [0.2]}
+
+    def generate(km, wanted):
+        asked.append(round(km, 3))
+        return [loop_course(d, cid=f"loop-{d}") for d in sizes[round(km, 3)]]
+
+    found, count = main._loop_or_laps(generate, 1.0, set())
+    assert count == 2 and found[0]["distance_km"] == pytest.approx(0.48)
+    assert asked == [1.0], "이미 만든 0.48km로 2바퀴가 맞으면 새로 만들지 않는다"
+
+
+def test_laps_shorter_than_a_running_track_are_not_used():
+    """한 바퀴가 트랙 한 바퀴(0.4km)보다 짧으면 블록 하나를 도는 꼴이다 — 그런 바퀴로 나누지 않는다."""
+    asked = []
+
+    def generate(km, wanted):
+        asked.append(round(km, 3))
+        return [loop_course(0.2, cid="block")]   # 이 근처에서는 블록 하나 도는 0.2km 순환만 나온다
+
+    found, count = main._loop_or_laps(generate, 1.0, set())
+    assert count == 1, "0.2km × 5바퀴를 주지 않는다"
+    assert all(km >= main.MIN_LAP_KM for km in asked), "트랙보다 짧은 바퀴는 만들어 보지도 않는다"
 
 
 def test_when_nothing_can_be_made_the_reason_is_passed_on():

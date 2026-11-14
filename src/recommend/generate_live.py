@@ -119,6 +119,66 @@ def _over_water(area, lat: float, lng: float, point: tuple) -> bool:
     return area is not None and area.water.crosses((lat, lng), point)
 
 
+WALK_DETOUR = 2.0     # 걸어서 가는 거리가 직선의 이 배수 + WALK_SLACK_M를 넘으면 '너머'에 있는 곳이다
+WALK_SLACK_M = 100    # 가까운 곳은 골목 하나 돌아가도 배수가 커진다 — 그만큼은 봐준다
+
+
+def _walk_from(graph, start_node, max_m: float) -> dict:
+    """출발 노드에서 걸어서 가는 거리 {노드: m}. 한 출발점에서 경유지를 여러 번 고르므로 그래프에 담아 둔다.
+    경유지마다 필요한 범위가 조금씩 다르다 — 모자랄 때마다 새로 재면 느려서(광주 10km 11초 → 28초),
+    넉넉히(두 배) 재 두고 그래도 모자랄 때만 다시 잰다."""
+    cache = graph.__dict__.setdefault("_walk_cache", {})
+    known = cache.get(start_node)
+    if known is None or known[0] < max_m:
+        reach = max(max_m * 2, known[0] * 2 if known else 0, 1000)
+        known = (reach, graph.distances_from(start_node, reach))
+        cache[start_node] = known
+    return known[1]
+
+
+def _walk_detoured(area, lat: float, lng: float, point: tuple) -> bool:
+    """이 지점이 직선으로는 가까운데 걸어서는 한참 돌아가야 하는 곳(건물·담장·막힌 길 너머)인가.
+
+    광주 용봉동(전남대) 1km 순환: 경유지가 직선 61~87m였는데 걸어서는 585m·600m+였다. 경유지를 직선거리로만
+    골라서 배율을 아무리 줄여도 코스가 2km 아래로 내려가지 않았다(물 건너편을 거르는 _over_water와 같은 이유).
+    """
+    graph = area.graph if area is not None else None
+    if graph is None or not hasattr(graph, "distances_from"):
+        return False
+    start = graph.nearest_node(lat, lng)
+    edge = _edge_under(graph, point)
+    if start is None or edge is None:
+        return False
+    straight = haversine_m(start, point)
+    limit = straight * WALK_DETOUR + WALK_SLACK_M
+    walk = _walk_from(graph, start, limit)
+    # 지점은 길 조각 중간에 있다(점이 듬성한 길이 흔하다) — 조각 양 끝 중 걸어서 가까운 쪽을 거쳐 간다
+    walked = min((walk[end] + haversine_m(end, point) for end in edge if end in walk), default=None)
+    return walked is None or walked > limit
+
+
+def _edge_under(graph, point: tuple, radius_m: float = 20):
+    """지점이 놓인 길 조각의 양 끝 노드 (a, b). 근처에 길이 없으면 None."""
+    best, best_d = None, radius_m
+    for way in graph.ways_near(point[0], point[1], radius_m):
+        points = graph.ways[way][1]
+        for a, b in zip(points, points[1:]):
+            d = _segment_distance_m(point, a, b)
+            if d <= best_d:
+                best, best_d = (a, b), d
+    return best
+
+
+def _segment_distance_m(p: tuple, a: tuple, b: tuple) -> float:
+    k = math.cos(math.radians(p[0])) * 111_320
+    ax, ay = (a[1] - p[1]) * k, (a[0] - p[0]) * 111_320
+    bx, by = (b[1] - p[1]) * k, (b[0] - p[0]) * 111_320
+    dx, dy = bx - ax, by - ay
+    length = dx * dx + dy * dy
+    f = 0.0 if length == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / length))
+    return math.hypot(ax + f * dx, ay + f * dy)
+
+
 def _secluded_at_night(area, point: tuple) -> bool:
     """이 지점이 밤에 인적 드문 길(상점도 조명도 없는 공원·숲·물가 보행로) 위인가.
 
@@ -146,7 +206,8 @@ def pick_land_vertices(lat: float, lng: float, target_distance_km: float, ways: 
     on_land = []
     for k, point in enumerate(ring_points(lat, lng, target_distance_km, angle_offset_deg, radius_scale)):
         snapped = _snap(point, ways)
-        if snapped and not _over_water(area, lat, lng, snapped) and not (night and _secluded_at_night(area, snapped)):
+        if (snapped and not _over_water(area, lat, lng, snapped) and not (night and _secluded_at_night(area, snapped))
+                and not _walk_detoured(area, lat, lng, snapped)):
             on_land.append(((angle_offset_deg + k * step) % 360, snapped))
     if len(on_land) < 2:
         return []

@@ -489,6 +489,7 @@ def _follow_with_tmap(path: list, target_km: float = None) -> dict:
 DAILY_LIMIT_TEXT = "오늘 Tmap 길 확인 횟수를 다 썼어요."   # 한도가 풀리는 시각은 확인하지 못해 약속하지 않는다
 MAX_TMAP_ROUNDS = 3     # Tmap으로 잇고 거리를 재는 횟수 (처음 + 크기를 고쳐 다시 짜기 2번)
 DISTANCE_OK = 0.05      # 실제로 달릴 경로가 요청 거리와 이 비율 안이어야 한다
+TMAP_SHRUNK = 0.5       # Tmap으로 이은 길이 설계의 이 비율보다 짧으면 다른 코스가 된 것이다 (쓰지 않는다)
 
 
 def _deliver_on_tmap(plan: dict, target_km: float, route_type: str, regenerate) -> dict:
@@ -515,6 +516,11 @@ def _deliver_on_tmap(plan: dict, target_km: float, route_type: str, regenerate) 
             unchecked = "unavailable"
             break
         km = route["follow"]["distance_km"]
+        if km < (plan.get("distance_km") or 0) * TMAP_SHRUNK:
+            # Tmap이 설계와 다른 길로 이었다(작은 순환이 한 지점 왕복으로 줄었다). 코스가 작으면 '설계를 다 따라갔다'는
+            # 확인도 통과해 버린다. 이 비율로 다시 짜도 의미가 없으니 그만두고, 설계를 주되 그렇다고 알린다
+            unchecked = unchecked or "mismatch"
+            break
         tries.append((abs(km - target_km) / target_km, plan, route))
         if abs(km - target_km) <= target_km * DISTANCE_OK:
             break
@@ -982,13 +988,18 @@ def _distance_fits(course: dict, target_km, route_type: str) -> bool:
 
 
 LAP_COUNTS = (2, 3, 4, 5, 6)   # 한 바퀴로 안 되면 이 순서로 바퀴 수를 늘려 본다 (같은 길 반복은 적을수록 좋다)
+MIN_LAP_KM = 0.4               # 한 바퀴는 적어도 트랙 한 바퀴 — 그보다 짧으면 블록 하나를 도는 꼴이다
 
 
 def _loop_or_laps(generate, km: float, tags) -> tuple:
     """(후보, 바퀴 수). 한 바퀴로 요청 거리의 순환을 만들면 그것을, 못 만들면 짧은 순환을 여러 바퀴.
 
-    '못 만들었다'는 생성이 실패했거나 요청 ±10% 안의 후보가 하나도 없는 것이다. 바퀴 수를 늘려도 안 되면
-    한 바퀴로 만든 것을 그대로 준다(그것도 없으면 생성 실패 이유를 그대로 올린다)."""
+    '못 만들었다'는 생성이 실패했거나 요청 ±10% 안의 후보가 하나도 없는 것이다. 바퀴 수는 적은 것부터 본다.
+    바퀴 수마다 먼저 이미 만든 순환(한 바퀴로 만들다 나온 짧은 것 포함)을 그 바퀴 수로 돌면 맞는지 보고,
+    없을 때만 '요청 ÷ 바퀴 수'로 새로 만든다 — 광주 용봉동 1km는 1km를 달라면 0.48km가 나오는데, 이걸
+    2바퀴(0.96km) 돌면 맞는 것을 놓치고 0.2km × 5바퀴까지 내려갔었다.
+    한 바퀴가 MIN_LAP_KM보다 짧아지는 바퀴 수는 쓰지 않는다. 그래도 안 되면 한 바퀴로 만든 것을 그대로 준다
+    (그것도 없으면 생성 실패 이유를 그대로 올린다)."""
     try:
         single = generate(km, tags)
     except ValueError as error:
@@ -996,13 +1007,25 @@ def _loop_or_laps(generate, km: float, tags) -> tuple:
     fits = lambda made, target: [c for c in made if abs(c["distance_km"] - target) <= target * CHOICE_OK]
     if single and fits(single, km):
         return single, 1
+    made_so_far = list(single or [])
+
+    def as_laps(made, count):
+        lap_ok = [c for c in made if c["distance_km"] >= MIN_LAP_KM]
+        return sorted(fits(lap_ok, km / count), key=lambda c: abs(c["distance_km"] * count - km))
+
     for count in LAP_COUNTS:
-        try:
-            made = generate(km / count, tags)
-        except ValueError:
-            continue
-        if fits(made, km / count):
-            return fits(made, km / count), count
+        if km / count < MIN_LAP_KM:
+            break
+        found = as_laps(made_so_far, count)
+        if not found:
+            try:
+                made = generate(km / count, tags)
+            except ValueError:
+                continue
+            made_so_far += made
+            found = as_laps(made, count)
+        if found:
+            return found, count
     if single:
         return single, 1
     raise failure
