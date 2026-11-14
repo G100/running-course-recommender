@@ -11,23 +11,29 @@ sealed class GuideAction {
     data class Status(val text: String) : GuideAction()
     /** 코스를 벗어났다 — 서버에 돌아가는 길을 묻는다 (POST /courses/reroute). */
     data class Reroute(val position: LatLng, val progressM: Double) : GuideAction()
-    object Arrived : GuideAction()
+    /** 남은 거리 (아래쪽 도착 예정 시각·남은 시간 계산에 쓴다) */
+    data class Remaining(val meters: Double) : GuideAction()
+    /** 도착. completed: 원래 코스의 80% 이상을 달렸다 — 그때만 평가를 받는다 (재탐색으로 질러간 것은 달린 게 아니다) */
+    data class Arrived(val completed: Boolean) : GuideAction()
 }
 
 /**
  * GPS 안내 (웹 페이지 startNavigationGPS와 같은 규칙). 위치를 넣으면 할 일을 돌려준다 — 화면·음성·네트워크는 부르는 쪽이 한다.
  *
- * - 회전 안내는 두 번만 말한다: 180m 앞에서 예고("120m 앞에서 오른쪽으로 도세요"), 30m 앞에서 실행.
+ * - 회전 안내는 두 번만 말한다: 180m 앞에서 예고("120m 후 GS25 앞에서 오른쪽 용주로로 도세요"), 30m 앞에서 실행.
  *   '직진' 안내(Tmap이 건널목마다 넣는다)는 건너뛴다. 바퀴가 바뀌는 안내는 지나갈 때 한 번, 거리 없이.
  * - 경로에서 40m 넘게 8초 동안 벗어나면 돌아가는 길을 묻는다. 못 찾으면 30초 뒤에 다시 묻는다.
  * - 도착: 경로를 따라 끝점 20m 안까지 왔고, 사람이 그 거리를 달릴 수 있는 시간이 지났을 때만.
  */
-class Guide(course: Course, private val startedAtMs: Long) {
+class Guide(course: Course, val startedAt: Long) {
     private var path = course.path
     private var cum = Geo.cumulative(path)
     private var steps = locate(course.steps, path, cum)
     private var total = cum.last()
     private val requiredMs = (total / 1000 * FASTEST_PACE_MIN_PER_KM * 60_000).toLong()
+    private val courseM = total          // 원래 코스 길이 (재탐색해도 바뀌지 않는다)
+    private var ranM = 0.0               // 경로를 따라 실제로 나아간 거리 (재탐색 전후를 합친다)
+    private var started = false
 
     /** 경로를 따라 지금까지 온 거리 (뒤로는 가지 않는다). */
     var progressM = 0.0
@@ -47,7 +53,14 @@ class Guide(course: Course, private val startedAtMs: Long) {
         val actions = mutableListOf<GuideAction>()
         val at = Geo.onPath(here, path, cum, progressM)
         // 경로에서 멀리 벗어난 위치로는 진행 거리를 옮기지 않는다 (엉뚱한 구간으로 건너뛰지 않게)
-        if (at.offM <= OFF_COURSE_M) progressM = maxOf(progressM, at.alongM)
+        if (at.offM <= OFF_COURSE_M && at.alongM > progressM) {
+            ranM += at.alongM - progressM
+            progressM = at.alongM
+        }
+        if (!started) {
+            started = true
+            actions += GuideAction.Say("길안내를 시작합니다")
+        }
 
         if (at.offM > OFF_COURSE_M) {
             val since = offSince ?: nowMs.also { offSince = it }
@@ -64,15 +77,16 @@ class Guide(course: Course, private val startedAtMs: Long) {
         }
 
         // 아직 달릴 시간이 안 됐으면 끝 직전으로 친다 (GPS가 튀어 앞쪽 구간에 잡혀도 도착으로 치지 않게)
-        val ranLongEnough = nowMs - startedAtMs >= requiredMs
+        val ranLongEnough = nowMs - startedAt >= requiredMs
         val counted = if (ranLongEnough) progressM else minOf(progressM, total - ARRIVE_M - 1)
         if (counted >= total - ARRIVE_M) {
             done = true
             actions += GuideAction.Banner(null, 0.0, null)
             actions += GuideAction.Say("목적지에 도착했습니다. 수고하셨습니다.", interrupt = true)
-            actions += GuideAction.Arrived
+            actions += GuideAction.Arrived(completed = ranM >= courseM * COMPLETE_SHARE)
             return actions
         }
+        actions += GuideAction.Remaining(maxOf(0.0, total - progressM))
         val (shown, say) = nextTurn()
         actions += shown
         say?.let { actions += it }
@@ -137,6 +151,14 @@ class Guide(course: Course, private val startedAtMs: Long) {
             remainingM <= SOON_M -> "soon"
             else -> return null
         }
+        if (step.turnType == FINISH) {
+            // 도착 지점은 회전이 아니다 — 미리 한 번만 알린다 (도착하면 도착 인사를 한다)
+            if (stage != "soon") return null
+            val key = "${step.cumM}|finish"
+            if (key == spokenKey) return null
+            spokenKey = key
+            return GuideAction.Say("${distanceText(remainingM)} 앞이 도착 지점입니다")
+        }
         if (step.turnType == LAP_TURN) {
             if (stage != "now") return null   // 바퀴가 바뀌는 건 미리 알릴 일이 아니다
             val key = "${step.cumM}|lap"
@@ -147,7 +169,7 @@ class Guide(course: Course, private val startedAtMs: Long) {
         val key = "${step.cumM}|$stage"
         if (key == spokenKey) return null
         spokenKey = key
-        return GuideAction.Say(if (stage == "now") step.instruction else "${distanceText(remainingM)} 앞에서 ${step.instruction}")
+        return GuideAction.Say(if (stage == "now") step.instruction else "${distanceText(remainingM)} 후 ${step.instruction}")
     }
 
     companion object {
@@ -159,6 +181,8 @@ class Guide(course: Course, private val startedAtMs: Long) {
         const val SOON_M = 180.0
         const val NOW_M = 30.0
         const val STRAIGHT = 11
+        const val FINISH = 201     // Tmap의 도착 지점 안내
+        const val COMPLETE_SHARE = 0.8   // 원래 코스의 이만큼은 달려야 완주로 친다
         const val LAP_TURN = 300   // 여러 바퀴 코스에서 바퀴가 바뀌는 안내 (서버 laps.py와 같은 번호)
         const val SAY_CHANGE_FROM_M = 50.0
 

@@ -26,8 +26,8 @@ data class Course(
     val raw: JSONObject,
 )
 
-/** 추천 한 건: 코스와 점수(0~1). */
-data class Recommendation(val course: Course, val score: Double)
+/** 추천 한 건: 코스와 점수(0~1), 항목별 점수(추천 이유를 보여 줄 때 쓴다). */
+data class Recommendation(val course: Course, val score: Double, val breakdown: Map<String, Double> = emptyMap())
 
 /** POST /recommend 응답. */
 data class Recommendations(
@@ -35,6 +35,8 @@ data class Recommendations(
     /** 다른 후보를 고르면 이 거리로 맞춘다 (요청 거리, 풍경까지 늘리기로 했으면 늘린 거리) */
     val deliverKm: Double?,
     val notice: String?,
+    /** 지도 데이터 출처 (OSM, ODbL) — 화면에 띄워야 한다 */
+    val attribution: String? = null,
 )
 
 object CourseJson {
@@ -43,12 +45,16 @@ object CourseJson {
         return Recommendations(
             results = (0 until results.length()).map { i ->
                 val item = results.getJSONObject(i)
-                Recommendation(course(item.getJSONObject("course")), item.optDouble("score", 0.0))
+                Recommendation(course(item.getJSONObject("course")), item.optDouble("score", 0.0), breakdown(item.optJSONObject("score_breakdown")))
             },
             deliverKm = body.optDouble("deliver_km").takeUnless { it.isNaN() },
             notice = body.optString("notice").takeIf { it.isNotBlank() && it != "null" },
+            attribution = body.optString("attribution").takeIf { it.isNotBlank() && it != "null" },
         )
     }
+
+    private fun breakdown(o: JSONObject?): Map<String, Double> =
+        o?.keys()?.asSequence()?.mapNotNull { k -> o.optDouble(k).takeUnless { it.isNaN() }?.let { k to it } }?.toMap() ?: emptyMap()
 
     fun course(c: JSONObject): Course {
         val path = c.getJSONArray("path").let { arr -> (0 until arr.length()).map { point(arr.getJSONArray(it)) } }
@@ -86,6 +92,7 @@ fun uncheckedText(course: Course): String? {
     val why = when (course.uncheckedReason) {
         "daily_limit" -> "오늘 Tmap 길 확인 횟수를 다 써서"
         "unavailable" -> "지금 Tmap에 연결되지 않아"
+        "mismatch" -> "Tmap 길로 이으면 코스 모양이 크게 달라져서"
         else -> return null
     }
     return "$why 이 코스는 Tmap으로 길을 확인하지 못했어요. 거리는 맞췄지만 인도·횡단보도 안내가 틀릴 수 있으니 달리면서 길을 살펴 주세요."
@@ -98,6 +105,8 @@ data class RecommendRequest(
     val here: LatLng,
     val userId: String,
     val tags: List<String> = emptyList(),
+    /** 주면 추천 대신 그곳까지 가는 코스를 만든다 (현위치 필요) */
+    val destination: LatLng? = null,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("preferred_distance_km", distanceKm)
@@ -108,5 +117,6 @@ data class RecommendRequest(
         put("user_id", userId)
         put("max_distance_km", 5)
         put("top_n", 3)   // 후보를 여럿 받아 러너가 고른다 (1등만 미리 Tmap으로 맞춰져 온다)
+        destination?.let { put("destination_lat", it.lat); put("destination_lng", it.lng) }
     }
 }

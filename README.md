@@ -372,7 +372,7 @@ python -m src.data_collection.local_osm     # 지도 DB만 따로 만들 때 (�
 
 ## 안드로이드 앱 (만드는 중)
 
-`android/`는 Kotlin 앱입니다. 지도는 Tmap 벡터 지도 SDK로 그리고, 코스 찾기·재탐색은 이 서버에 묻습니다(웹 페이지와 같은 API). 지금 되는 것: 현재 위치에서 코스 찾기, 후보 고르기, 지도에 코스 그리기, 실제 위치로 음성 안내(회전 예고·실행, 코스 이탈 시 재탐색, 화면 켜 두기). 도착하면 별점을 보내 다음 추천에 반영합니다. 화면이 꺼져도 도는 안내는 아직 없습니다.
+`android/`는 Kotlin 앱입니다. 지도는 Tmap 벡터 지도 SDK로 그리고, 코스 찾기·재탐색은 이 서버에 묻습니다(웹 페이지와 같은 API). 지금 되는 것: 현재 위치에서 코스 찾기(거리·모양·풍경, 편도는 목적지 검색), 후보 고르기와 추천 이유, 지도에 코스 그리기, 실제 위치로 음성 안내(회전 예고·실행, 코스 이탈 시 재탐색, 남은 거리·도착 예정 시각, 음성 켜기·끄기, 화면 켜 두기). 코스의 80% 넘게 달려 도착하면 별점·항목별 답·후기를 보내 다음 추천에 반영합니다. 안내하는 동안 알림창에 "길안내 중"이 떠 있어서, 화면을 잠가도 GPS와 음성 안내가 이어집니다(포그라운드 서비스).
 
 1. 안드로이드 SDK를 설치합니다(Android Studio 설치 마법사 → Standard, 또는 [command-line tools](https://developer.android.com/studio#command-line-tools-only)의 `sdkmanager`). 위치는 아래 `sdk.dir`과 같게 둡니다.
 2. Tmap 벡터 지도 SDK를 받습니다: [Tmap API 가이드 → VSM_Android → SDK 다운로드](https://tmapapi.tmapmobility.com/main.html#androidVSM/sample/androidSample.sdk_download)에서 V3.8을 받아, 압축 안 `lib/`의 `.aar` 두 개를 `android/app/libs/`에 넣습니다. SDK는 Tmap의 것이라 저장소에 올리지 않습니다.

@@ -50,6 +50,8 @@ class CourseJsonTest {
         assertTrue(uncheckedText(limit)!!.startsWith("오늘 Tmap 길 확인 횟수를 다 써서"))
         val down = CourseJson.course(JSONObject("""{"path": [[1,2],[3,4]], "tmap_unchecked": "unavailable"}"""))
         assertTrue(uncheckedText(down)!!.startsWith("지금 Tmap에 연결되지 않아"))
+        val reshaped = CourseJson.course(JSONObject("""{"path": [[1,2],[3,4]], "tmap_unchecked": "mismatch"}"""))
+        assertTrue("Tmap이 다른 길로 이어 설계를 준 코스도 알린다", uncheckedText(reshaped)!!.startsWith("Tmap 길로 이으면 코스 모양이 크게 달라져서"))
         val joinedCourse = CourseJson.recommendations(JSONObject(joined)).results[0].course
         assertNull(uncheckedText(joinedCourse))
         val notYetJoined = CourseJson.recommendations(JSONObject(joined)).results[1].course

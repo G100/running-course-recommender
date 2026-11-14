@@ -2,6 +2,7 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 // 내 PC에만 있는 값: Tmap 키와 서버 주소 (android/local.properties, git에 올리지 않는다)
@@ -28,6 +29,7 @@ android {
 
     buildFeatures {
         buildConfig = true
+        compose = true
     }
 
     compileOptions {
@@ -39,6 +41,13 @@ android {
 dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
+    // 화면: Compose (웹 데모의 폰 화면 디자인 + 움직임)
+    implementation(platform("androidx.compose:compose-bom:2024.09.00"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.animation:animation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.13.0")
     // Tmap 벡터 지도 SDK (Tmap 개발자 사이트에서 받아 app/libs에 둔다). 지도 SDK가 flatbuffers를 쓴다
     implementation(files("libs/vsm-tmap-sdk-v2-eaa-2.0.14.aar"))
     implementation(files("libs/tmap-sdk-3.8.aar"))

@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- 화면을 잠가도 안내가 이어지게: 안내하는 동안 위치를 쓰는 포그라운드 서비스와 그 알림 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Tmap 지도 SDK 예제와 같게 둔다 (지도 SDK가 하드웨어 가속을 끈 상태를 전제로 한다) -->
     <application
@@ -16,15 +20,28 @@
         android:hardwareAccelerated="false"
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.Runmate">
+        <!-- 화면(Compose)의 움직임·그림자는 하드웨어 가속이 있어야 매끄럽다. 지도 SDK가 이 화면에서도 그려지는지 폰에서 확인했다 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="portrait">
+            android:hardwareAccelerated="true"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".LoginActivity"
+            android:exported="false"
+            android:hardwareAccelerated="true"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
+        <service
+            android:name=".GuideService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
     </application>
 
 </manifest>

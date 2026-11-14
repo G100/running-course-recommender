@@ -21,4 +21,21 @@
     <string name="rate_send">평가 보내기</string>
     <string name="rate_sent">고마워요! 다음 추천에 반영할게요.</string>
     <string name="no_results">조건에 맞는 코스가 없어요. 거리를 바꿔 다시 찾아보세요.</string>
+    <string name="voice_on">소리 켬</string>
+    <string name="voice_off">소리 끔</string>
+    <string name="recenter">내 위치</string>
+    <string name="comment_hint">후기 (선택, 500자까지)</string>
+    <string name="dest_hint">목적지 (선택) — 예: 오동도</string>
+    <string name="dest_search">검색</string>
+    <string name="dest_none">찾는 장소가 없어요. 다른 이름으로 검색해 보세요.</string>
+    <string name="loop_needs_no_dest">목적지가 있으면 편도로 갑니다.</string>
+    <string name="guide_running">길안내 중 · 화면을 잠가도 안내가 이어져요</string>
+    <string name="guide_channel">길안내</string>
+    <string name="login_intro">처음 한 번만 로그인하면 다음부터는 바로 들어가요. 내 취향과 평가는 서버의 내 계정에 저장돼요.</string>
+    <string name="username_hint">아이디 (2~20자 한글·영문·숫자·밑줄)</string>
+    <string name="password_hint">비밀번호 (8자 이상)</string>
+    <string name="login">로그인</string>
+    <string name="signup">가입하기</string>
+    <string name="logout">로그아웃</string>
+    <string name="login_again">로그인이 만료됐어요. 다시 로그인해 주세요.</string>
 </resources>

@@ -34,7 +34,7 @@ class GuideTest {
         val words = run(guide, 0, 520)
         val turn = words.filter { "오른쪽" in it }
         assertEquals(2, turn.size)
-        assertTrue(turn[0], turn[0].endsWith("m 앞에서 오른쪽으로 도세요"))
+        assertTrue(turn[0], turn[0].endsWith("m 후 오른쪽으로 도세요"))
         assertEquals("오른쪽으로 도세요", turn[1])
         assertFalse("직진 안내는 말하지 않는다", words.any { "직진" in it })
     }
@@ -103,10 +103,10 @@ class GuideTest {
         val guide = Guide(straightKm(), 0)
         // 1km를 1분 만에 따라왔다 — 2.5분보다 빨리 달릴 수는 없으니 GPS가 튄 것이다
         val quick = (0..995 step 5).flatMapIndexed { i, d -> guide.onLocation(at(d.toDouble()), i * 300L) }
-        assertTrue(quick.none { it == GuideAction.Arrived })
-        assertTrue(guide.onLocation(at(995.0), 60_000).none { it == GuideAction.Arrived })
+        assertTrue(quick.none { it is GuideAction.Arrived })
+        assertTrue(guide.onLocation(at(995.0), 60_000).none { it is GuideAction.Arrived })
         val arrived = guide.onLocation(at(995.0), 151_000)
-        assertTrue(arrived.contains(GuideAction.Arrived))
+        assertTrue(arrived.any { it is GuideAction.Arrived })
         assertTrue(guide.done)
         assertTrue("도착한 뒤에는 더 안내하지 않는다", guide.onLocation(at(995.0), 160_000).isEmpty())
     }
@@ -118,7 +118,7 @@ class GuideTest {
         val loop = Course("l", "", square, emptyList(), 1.0, 1, null, true, null, JSONObject())
         val guide = Guide(loop, 0)
         val first = guide.onLocation(at(0.0), 10_000_000)
-        assertTrue("출발점에 서 있는데 도착이라고 하면 안 된다", first.none { it == GuideAction.Arrived })
+        assertTrue("출발점에 서 있는데 도착이라고 하면 안 된다", first.none { it is GuideAction.Arrived })
         assertTrue(guide.progressM < 50)
     }
 
@@ -132,5 +132,73 @@ class GuideTest {
         val path = straightKm().path
         val placed = Guide.locate(listOf(Step(LatLng(35.0 + 205 * m, 127.0), "왼쪽", 12, null)), path, Geo.cumulative(path))
         assertEquals("가장 가까운 점(200m 또는 210m)", 205.0, placed.single().cumM!!, 5.5)
+    }
+
+    // ── 팀원 앱에서 가져온 것 ──
+
+    @Test fun guidance_says_it_has_started_once() {
+        val guide = Guide(straightKm(), 0)
+        assertEquals(listOf("길안내를 시작합니다"), said(guide.onLocation(at(0.0), 0)).filter { "시작" in it })
+        assertTrue(said(guide.onLocation(at(3.0), 1000)).none { "시작" in it })
+    }
+
+    @Test fun the_finish_point_is_said_as_the_finish_not_as_a_turn() {
+        val path = straightKm().path
+        val finish = Step(path.last(), "도착", 201, 1000.0)
+        val guide = Guide(straightKm().copy(steps = listOf(finish)), 0)
+        val words = run(guide, 0, 990, startMs = 0)
+        assertTrue(words.toString(), words.any { it.endsWith("m 앞이 도착 지점입니다") })
+        assertTrue("도착 안내를 회전처럼 말하지 않는다", words.none { it == "도착" || it.endsWith("후 도착") || it.endsWith("앞에서 도착") })
+    }
+
+    @Test fun the_remaining_distance_is_given_each_time() {
+        val guide = Guide(straightKm(), 0)
+        val left = guide.onLocation(at(250.0), 0).filterIsInstance<GuideAction.Remaining>().single()
+        assertEquals(750.0, left.meters, 3.0)
+    }
+
+    @Test fun arriving_after_running_most_of_the_course_counts_as_a_completed_run() {
+        val guide = Guide(straightKm(), 0)
+        val all = (0..995 step 5).flatMapIndexed { i, d -> guide.onLocation(at(d.toDouble()), i * 2_000L) }
+        assertEquals(true, all.filterIsInstance<GuideAction.Arrived>().single().completed)
+    }
+
+    @Test fun a_way_back_that_skips_most_of_the_course_is_not_a_completed_run() {
+        // ㄷ자 코스: 북쪽 500m → 동쪽 20m → 남쪽 500m (끝이 출발점 옆). 50m에서 서쪽으로 벗어났더니
+        // 서버가 끝으로 바로 가는 길(약 115m)을 줬다 — 코스 대부분을 달리지 않았다
+        val corners = listOf(at(0.0), at(500.0), at(500.0, 20.0), at(0.0, 20.0))
+        val uPath = corners.zipWithNext { a, b ->
+            (0 until 50).map { k -> LatLng(a.lat + (b.lat - a.lat) * k / 50, a.lng + (b.lng - a.lng) * k / 50) }
+        }.flatten() + corners.last()
+        val guide = Guide(Course("u", "", uPath, emptyList(), 1.02, 1, null, true, null, JSONObject()), 0)
+        (0..50 step 5).forEachIndexed { i, d -> guide.onLocation(at(d.toDouble()), i * 2_000L) }
+        guide.onLocation(at(50.0, -45.0), 30_000)
+        assertTrue(guide.onLocation(at(50.0, -45.0), 39_000).any { it is GuideAction.Reroute })
+        val back = listOf(at(50.0, -45.0), at(0.0, -45.0), at(0.0, 20.0))
+        guide.onRerouted(Course("b", "", back, emptyList(), 0.12, 1, null, true, null, JSONObject()), -800.0)
+        val along = back.zipWithNext { a, b ->
+            val n = (Geo.meters(a, b) / 5).toInt().coerceAtLeast(1)
+            (0 until n).map { k -> LatLng(a.lat + (b.lat - a.lat) * k / n, a.lng + (b.lng - a.lng) * k / n) }
+        }.flatten() + back.last()
+        val arrived = along.flatMapIndexed { k, p -> guide.onLocation(p, 1_000_000L + k * 2_000L) }
+            .filterIsInstance<GuideAction.Arrived>().single()
+        assertEquals("165m만 달렸다 (1,020m 코스의 80%가 안 된다)", false, arrived.completed)
+    }
+
+    @Test fun running_a_long_way_back_still_counts_the_distance_run() {
+        // 벗어났다가 돌아가는 길이 길면, 그 길도 실제로 달린 거리다
+        val guide = Guide(straightKm(), 0)
+        (0..100 step 5).forEachIndexed { i, d -> guide.onLocation(at(d.toDouble()), i * 2_000L) }
+        guide.onLocation(at(100.0, 60.0), 50_000)
+        guide.onLocation(at(100.0, 60.0), 59_000)
+        val back = listOf(at(100.0, 60.0), at(990.0, 60.0), at(1000.0))
+        guide.onRerouted(Course("b", "", back, emptyList(), 0.95, 1, null, true, null, JSONObject()), -50.0)
+        val along = back.zipWithNext { a, b ->
+            val n = (Geo.meters(a, b) / 5).toInt().coerceAtLeast(1)
+            (0 until n).map { k -> LatLng(a.lat + (b.lat - a.lat) * k / n, a.lng + (b.lng - a.lng) * k / n) }
+        }.flatten() + back.last()
+        val arrived = along.flatMapIndexed { k, p -> guide.onLocation(p, 1_000_000L + k * 2_000L) }
+            .filterIsInstance<GuideAction.Arrived>().single()
+        assertEquals(true, arrived.completed)
     }
 }

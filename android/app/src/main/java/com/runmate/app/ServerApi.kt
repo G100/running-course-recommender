@@ -9,9 +9,22 @@ import java.net.URL
 import java.util.concurrent.Executors
 
 /** 우리 서버(FastAPI)에 묻는다. 네트워크는 작업 스레드에서, 결과는 화면 스레드로 돌려준다. */
-class ServerApi(private val baseUrl: String) {
+class ServerApi(private val baseUrl: String, private val token: () -> String? = { null }) {
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
+
+    // ── 계정: 처음에만 로그인하고, 다음부터는 저장한 토큰으로 들어온다 ──
+
+    fun signUp(username: String, password: String, done: (Result<Login>) -> Unit) =
+        call(post("/auth/signup", JSONObject().put("username", username).put("password", password), READ_SHORT_MS) { AuthJson.login(it) }, done)
+
+    fun logIn(username: String, password: String, done: (Result<Login>) -> Unit) =
+        call(post("/auth/login", JSONObject().put("username", username).put("password", password), READ_SHORT_MS) { AuthJson.login(it) }, done)
+
+    /** 저장한 토큰이 아직 살아 있나 (만료됐으면 401) */
+    fun me(done: (Result<Unit>) -> Unit) = call(get("/auth/me") { }, done)
+
+    fun logOut(done: (Result<Unit>) -> Unit) = call(post("/auth/logout", JSONObject(), READ_SHORT_MS) { }, done)
 
     fun recommend(request: RecommendRequest, done: (Result<Recommendations>) -> Unit) =
         post("/recommend", request.toJson(), READ_LONG_MS) { CourseJson.recommendations(it) }.let { call(it, done) }
@@ -35,11 +48,31 @@ class ServerApi(private val baseUrl: String) {
         call(post("/courses/reroute", body, READ_SHORT_MS) { CourseJson.course(it) to it.optDouble("extra_m", 0.0) }, done)
     }
 
-    /** 달린 뒤 별점 (1~5). 추천받은 코스여야 서버가 받는다 — 무엇 때문에 추천했는지 서버가 기억해 두었다가 학습한다. */
-    fun feedback(userId: String, courseId: String, rating: Int, done: (Result<Unit>) -> Unit) {
+    /**
+     * 달린 뒤 별점 (1~5)과 항목별 답(aspects, 선택)·후기(선택). 추천받은 코스여야 서버가 받는다 — 무엇 때문에
+     * 추천했는지 서버가 기억해 두었다가 학습한다. 서버가 정리한 내 취향 문장을 돌려준다.
+     */
+    fun feedback(userId: String, courseId: String, rating: Int, aspects: Map<String, String>, comment: String?,
+                 done: (Result<List<String>>) -> Unit) {
         val body = JSONObject().put("user_id", userId).put("course_id", courseId).put("rating", rating)
-        call(post("/feedback", body, READ_SHORT_MS) { }, done)
+        if (aspects.isNotEmpty()) body.put("aspects", JSONObject(aspects))
+        comment?.trim()?.takeIf { it.isNotEmpty() }?.let { body.put("comment", it.take(500)) }
+        call(post("/feedback", body, READ_SHORT_MS) { ChoicesJson.summary(it) }, done)
     }
+
+    /** 고를 수 있는 풍경 (현위치를 주면 가까운 것과 얼마나 가까운지도 준다). */
+    fun scenery(here: LatLng?, done: (Result<List<SceneryOption>>) -> Unit) =
+        call(get("/onboarding/scenery" + (here?.let { "?lat=${it.lat}&lng=${it.lng}" } ?: "")) { ChoicesJson.scenery(it) }, done)
+
+    /** 목적지 검색 (현위치를 주면 가까운 곳을 먼저 준다). */
+    fun places(query: String, here: LatLng?, done: (Result<List<Place>>) -> Unit) {
+        val q = java.net.URLEncoder.encode(query, "UTF-8")
+        call(get("/places?q=$q" + (here?.let { "&lat=${it.lat}&lng=${it.lng}" } ?: "")) { ChoicesJson.places(it) }, done)
+    }
+
+    /** 달린 뒤 물어볼 항목별 질문 (서버가 정한다). */
+    fun feedbackQuestions(done: (Result<List<FeedbackQuestion>>) -> Unit) =
+        call(get("/onboarding/feedback") { ChoicesJson.questions(it) }, done)
 
     private fun <T> call(task: () -> T, done: (Result<T>) -> Unit) {
         worker.execute {
@@ -55,6 +88,7 @@ class ServerApi(private val baseUrl: String) {
             readTimeout = readMs
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            authHeaders(token()).forEach { (k, v) -> setRequestProperty(k, v) }
         }
         try {
             connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
@@ -67,8 +101,32 @@ class ServerApi(private val baseUrl: String) {
         }
     }
 
-    private fun detail(text: String): String =
-        runCatching { JSONObject(text).optString("detail") }.getOrNull()?.takeIf { it.isNotBlank() } ?: text.take(200)
+    private fun <T> get(path: String, parse: (JSONObject) -> T): () -> T = {
+        val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
+            connectTimeout = CONNECT_MS
+            readTimeout = READ_SHORT_MS
+            authHeaders(token()).forEach { (k, v) -> setRequestProperty(k, v) }
+        }
+        try {
+            val ok = connection.responseCode in 200..299
+            val text = (if (ok) connection.inputStream else connection.errorStream)?.bufferedReader(Charsets.UTF_8)?.readText().orEmpty()
+            if (!ok) throw ServerError(connection.responseCode, detail(text))
+            parse(JSONObject(text))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /** 서버가 보낸 오류 사유를 사람이 읽을 문장으로. 입력 검사 오류는 [{"msg": ...}, ...] 목록으로 온다. */
+    private fun detail(text: String): String = runCatching {
+        when (val d = JSONObject(text).opt("detail")) {
+            is org.json.JSONArray -> (0 until d.length()).joinToString("\n") {
+                d.getJSONObject(it).optString("msg").removePrefix("Value error, ")
+            }
+            is String -> d
+            else -> null
+        }
+    }.getOrNull()?.takeIf { it.isNotBlank() } ?: text.take(200)
 
     companion object {
         const val CONNECT_MS = 10_000
