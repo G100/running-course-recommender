@@ -29,6 +29,9 @@ def isolated_course_db(tmp_path, monkeypatch):
     monkeypatch.setattr(sidewalk, "FACTS_PATH", str(tmp_path / "sidewalk_facts.sqlite"))
     monkeypatch.setattr(sidewalk, "SEED_PATH", str(tmp_path / "no_seed.json"))
     monkeypatch.setattr(user_store, "DB_PATH", str(tmp_path / "app.sqlite"))
+    # 서버는 시작할 때 .env를 읽는다. 거기 운영 DB(DATABASE_URL)가 있어도 테스트는 늘 임시 SQLite에 쓴다
+    # (PostgreSQL 시험은 TEST_DATABASE_URL로 따로 연다 — test_user_store_backends.py)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     from src.api_clients import elevation
     monkeypatch.setattr(elevation, "CACHE_PATH", str(tmp_path / "elevation_cache.sqlite"))
     monkeypatch.setattr(elevation, "_memory", {})
