@@ -145,3 +145,54 @@ def test_a_loaded_map_that_only_barely_covers_the_course_is_not_used(local_map):
     local_map.clear()
     area = area_cache.cached_area_for_path(path)
     assert area is not loaded and len(local_map) == 1
+
+
+# ── 메모리에 들고 있는 동네 수 (서버가 오래 켜져 있어도 메모리가 계속 늘지 않게) ──
+
+def test_only_the_latest_neighbourhoods_stay_in_memory(local_map, monkeypatch):
+    """동네 도로망은 동네당 수백 MB다. 비우지 않고 쌓기만 하면 서버가 오래 켜져 있을수록 메모리가 모자란다."""
+    monkeypatch.setattr(area_cache, "AREAS_IN_MEMORY", 2)
+    for i in range(3):
+        area_cache.load_area(LAT + 0.1 * i, LNG, radius_m=900)
+    assert len(area_cache._memory) == 2
+    reads = len(local_map)
+    area_cache.load_area(LAT + 0.1 * 2, LNG, radius_m=900)   # 가장 최근 것은 그대로 있다
+    assert len(local_map) == reads
+    area_cache.load_area(LAT, LNG, radius_m=900)               # 가장 오래된 것은 비웠다 — 다시 읽는다
+    assert len(local_map) == reads + 1
+
+
+def test_using_a_neighbourhood_again_keeps_it_in_memory(local_map, monkeypatch):
+    monkeypatch.setattr(area_cache, "AREAS_IN_MEMORY", 2)
+    area_cache.load_area(LAT, LNG, radius_m=900)
+    area_cache.load_area(LAT + 0.1, LNG, radius_m=900)
+    area_cache.load_area(LAT, LNG, radius_m=900)               # 다시 썼다 → 가장 최근
+    area_cache.load_area(LAT + 0.2, LNG, radius_m=900)         # 새 동네가 들어오면 그사이 안 쓴 쪽을 비운다
+    reads = len(local_map)
+    area_cache.load_area(LAT, LNG, radius_m=900)
+    assert len(local_map) == reads, "자주 쓰는 동네는 남는다"
+
+
+def test_warming_up_loads_only_as_many_as_can_stay(local_map, monkeypatch):
+    """미리 불러오기도 들고 있을 수 있는 만큼만 — 가장 최근 동네부터 남긴다."""
+    for i in range(4):
+        area_cache.load_area(LAT + 0.1 * i, LNG, radius_m=900)
+    monkeypatch.setattr(area_cache, "_memory", {})
+    monkeypatch.setattr(area_cache, "AREAS_IN_MEMORY", 1)
+    area_cache.warm_recent()
+    assert len(local_map) == 4 + 1, "하나만 읽는다"
+    assert len(area_cache._memory) == 1
+    reads = len(local_map)
+    area_cache.load_area(LAT + 0.1 * 3, LNG, radius_m=900)     # 남은 것은 가장 최근 동네다
+    assert len(local_map) == reads
+
+
+def test_the_limit_comes_from_the_server_setting(monkeypatch):
+    import importlib
+    monkeypatch.setenv("RUNMATE_AREAS_IN_MEMORY", "1")
+    reloaded = importlib.reload(area_cache)
+    try:
+        assert reloaded.AREAS_IN_MEMORY == 1
+    finally:
+        monkeypatch.delenv("RUNMATE_AREAS_IN_MEMORY")
+        importlib.reload(area_cache)

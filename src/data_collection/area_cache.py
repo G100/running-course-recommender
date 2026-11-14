@@ -53,6 +53,28 @@ SELECTORS = [
 _memory = {}
 _building = threading.Lock()   # 같은 동네를 요청과 미리 불러오기가 동시에 읽지 않게
 
+# 메모리에 들고 있는 동네 수. 동네 도로망은 동네당 수백 MB라(여의도 10km 약 300MB), 비우지 않고 쌓기만 하면
+# 서버가 오래 켜져 있을수록 메모리가 모자란다. 가장 오래 안 쓴 동네부터 비운다. 메모리가 작은 서버(1GB)는
+# RUNMATE_AREAS_IN_MEMORY=1 로 줄인다 (다시 쓰면 파일에서 다시 읽는다 — 몇 초 더 걸릴 뿐이다)
+AREAS_IN_MEMORY = max(1, int(os.environ.get("RUNMATE_AREAS_IN_MEMORY", "6")))
+
+
+def _keep(key: str, area):
+    """이 동네를 가장 최근으로 들고 있는다. 넘치면 가장 오래 안 쓴 것부터 비운다."""
+    _memory.pop(key, None)
+    _memory[key] = area
+    while len(_memory) > AREAS_IN_MEMORY:
+        del _memory[next(iter(_memory))]
+    return area
+
+
+def _recall(key: str):
+    """들고 있으면 꺼내면서 가장 최근으로 올린다."""
+    area = _memory.pop(key, None)
+    if area is not None:
+        _memory[key] = area
+    return area
+
 # 최근 코스를 만든 동네(격자 칸)를 기억해 두었다가 서버가 다시 켜질 때 미리 불러 둔다. 처음 요청에서 그 동네
 # 지도를 읽고 길마다 점수를 매기는 데만 5~6초가 들었다(여의도 5km 순환). 코스는 매번 새로 짠다 — 미리 해 두는 건
 # 지도 데이터뿐이다. 남는 건 격자 칸의 위치라 사람의 정확한 위치는 남지 않는다(그래도 커밋하지 않는다).
@@ -208,23 +230,23 @@ def load_area(lat: float, lng: float, radius_m: float = 900, allow_fetch: bool =
         # 파일에서 읽으니 필요한 만큼 넓혀도 된다 (0.01° 단위로 맞춰 같은 동네는 같은 것을 쓴다)
         half = max(TIERS[0][0], math.ceil((radius_m / M_PER_DEG + 0.015) * 100) / 100)
         key = f"local_{clat:.4f}_{clng:.4f}_{half:.2f}"
-        if key not in _memory:
-            with _building:
-                if key not in _memory:   # 기다리는 사이 다른 쪽(미리 불러오기)이 읽어 두었다
-                    bbox = (clat - half, clng - half, clat + half, clng + half)
-                    _memory[key] = Area(bbox, local_osm.load_bbox(bbox), local=True)
+        with _building:   # 기다리는 사이 다른 쪽(미리 불러오기)이 읽어 두었을 수 있다
+            area = _recall(key)
+            if area is None:
+                bbox = (clat - half, clng - half, clat + half, clng + half)
+                area = _keep(key, Area(bbox, local_osm.load_bbox(bbox), local=True))
         _remember(clat, clng, half)
-        return _memory[key]
+        return area
     for tier in range(_tier_for(radius_m), len(TIERS)):
         half = TIERS[tier][0]
         key = f"{clat:.4f}_{clng:.4f}_t{tier}"
-        if key in _memory:
-            return _memory[key]
+        area = _recall(key)
+        if area is not None:
+            return area
         if os.path.exists(_path(key)):
             with open(_path(key), encoding="utf-8") as f:
                 stored = json.load(f)
-            _memory[key] = Area(tuple(stored["bbox"]), stored["elements"])
-            return _memory[key]
+            return _keep(key, Area(tuple(stored["bbox"]), stored["elements"]))
 
     if not allow_fetch:
         return None
@@ -239,8 +261,7 @@ def load_area(lat: float, lng: float, radius_m: float = 900, allow_fetch: bool =
     os.makedirs(_dir(), exist_ok=True)
     with open(_path(key), "w", encoding="utf-8") as f:
         json.dump({"bbox": list(bbox), "elements": elements}, f, ensure_ascii=False)
-    _memory[key] = Area(bbox, elements)
-    return _memory[key]
+    return _keep(key, Area(bbox, elements))
 
 
 def _recent() -> list:
@@ -271,13 +292,15 @@ def warm_recent() -> None:
     """기억해 둔 동네의 지도를 읽고 길마다 점수를 매겨 둔다 (서버를 켤 때 뒤에서 한 번)."""
     if not local_osm.available():
         return
-    for clat, clng, half in _recent():
+    # 들고 있을 수 있는 만큼만, 오래된 것부터 읽어 가장 최근 동네가 마지막에 남게 한다
+    for clat, clng, half in reversed(_recent()[:AREAS_IN_MEMORY]):
         key = f"local_{clat:.4f}_{clng:.4f}_{half:.2f}"
         with _building:
-            if key not in _memory:
+            area = _recall(key)
+            if area is None:
                 bbox = (clat - half, clng - half, clat + half, clng + half)
-                _memory[key] = Area(bbox, local_osm.load_bbox(bbox), local=True)
-        graph = _memory[key].graph
+                area = _keep(key, Area(bbox, local_osm.load_bbox(bbox), local=True))
+        graph = area.graph
         if graph is not None:
             for way in range(len(graph.ways)):
                 graph.way_score(way)
