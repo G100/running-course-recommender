@@ -366,6 +366,52 @@ def test_a_piece_that_fails_for_another_reason_fails_the_whole_stitch(monkeypatc
         tmap_follow.stitch((LAT, LNG), (LAT, LNG + D), [(LAT + D * i, LNG) for i in range(1, 13)])
 
 
+class TestAvoidedOnlyWhenTmapWentAround:
+    """'Tmap이 피한 길'은 Tmap이 그 길 대신 더 멀리 돌아갔을 때만 적는다.
+
+    Tmap은 경유지 사이를 최단거리로 잇는다. 우리 길을 건너뛰고 더 먼 길로 갔다면 우리 길이 Tmap 지도에 없는
+    것이다(수원 광교 단지 안 보행로). 더 짧은 길로 갔다면 Tmap이 우리가 모르는 지름길을 안 것뿐이다 — 예전에는 그것도
+    '피한 길'로 적어서, 시험 요청이 쌓일수록 좋은 길이 빠지고 거리가 틀렸다(10km 순환: 여의도 −9.9%, 대전 +10%,
+    피한 길 목록을 비우면 −2.1%, +1%)."""
+
+    def _plan_and_graph(self):
+        north = [(LAT, LNG)] + [(LAT + D, LNG + i * D) for i in range(7)] + [(LAT, LNG + 6 * D)]
+        ways = [_way(1, north, highway="footway")]
+        graph = rg.RoadGraph(ways, build_indexes({"all": ways}), rg.PRIOR, facts={}, avoided=set())
+        return graph, north
+
+    def test_a_road_tmap_went_around_by_a_longer_way_is_avoided(self):
+        graph, north = self._plan_and_graph()
+        around = [(LAT, LNG), (LAT - 2.5 * D, LNG), (LAT - 2.5 * D, LNG + 6 * D), (LAT, LNG + 6 * D)]   # 반대쪽으로 더 멀리 돌았다
+        votes = tmap_follow._ride_votes(graph, tmap_follow._nodes(graph, north), [list(p) for p in around])
+        assert votes.get(0) is False
+
+    def test_a_road_tmap_cut_short_by_a_shorter_way_is_not_avoided(self):
+        graph, north = self._plan_and_graph()
+        shortcut = [(LAT, LNG), (LAT, LNG + 6 * D)]                                    # 우리가 모르는 지름길
+        votes = tmap_follow._ride_votes(graph, tmap_follow._nodes(graph, north), [list(p) for p in shortcut])
+        assert 0 not in votes, "더 짧은 길로 갔을 뿐인데 '피한 길'로 적었다"
+
+    def test_a_road_tmap_rode_is_still_ridden(self):
+        graph, north = self._plan_and_graph()
+        votes = tmap_follow._ride_votes(graph, tmap_follow._nodes(graph, north), [list(p) for p in north])
+        assert votes.get(0) is True
+
+    def test_marks_made_by_the_old_rule_are_cleared_once(self, tmp_path, monkeypatch):
+        import sqlite3
+        from src.recommend import sidewalk
+        path = tmp_path / "facts.sqlite"
+        with sqlite3.connect(path) as db:
+            db.execute("CREATE TABLE facts (way TEXT PRIMARY KEY, sidewalk INTEGER NOT NULL)")
+            db.execute("CREATE TABLE tmap_ways (way TEXT PRIMARY KEY, ridden INTEGER NOT NULL DEFAULT 0, avoided INTEGER NOT NULL DEFAULT 0)")
+            db.execute("INSERT INTO tmap_ways VALUES ('old-a', 0, 3), ('old-b', 2, 1)")
+        monkeypatch.setattr(sidewalk, "FACTS_PATH", str(path))
+        assert tmap_follow.tmap_avoided() == set(), "예전 규칙으로 적힌 '피한 길'은 지운다"
+        tmap_follow.remember_ways({"new": False})
+        assert tmap_follow.tmap_avoided() == {"new"}, "지운 건 한 번뿐 — 새 규칙으로 적은 것은 남는다"
+        assert "old-b" in tmap_follow.tmap_ridden(), "탄 길 기록은 그대로 둔다"
+
+
 def test_a_piece_refused_for_the_daily_limit_is_not_asked_again(monkeypatch):
     """하루 한도를 넘었으면 쉬었다 다시 물어도 소용없다 — 바로 실패한다."""
     import pytest

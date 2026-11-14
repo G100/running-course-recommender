@@ -308,6 +308,7 @@ def _better(a: dict, b: dict, target_km: float) -> bool:
 # ── Tmap이 탄 길·피한 길을 쌓는다 ──
 
 RIDDEN_SHARE, AVOIDED_SHARE, MIN_WAY_M = 0.8, 0.2, 40
+DETOUR_SLACK, DETOUR_SLACK_M = 0.05, 20   # Tmap이 우리 토막보다 이만큼 넘게 길게 돌았을 때만 '피한 길' (잰 길이 오차를 봐준다)
 
 
 def way_id(points: list) -> str:
@@ -317,26 +318,78 @@ def way_id(points: list) -> str:
     return f"{a[0]:.6f},{a[1]:.6f},{m[0]:.6f},{m[1]:.6f},{b[0]:.6f},{b[1]:.6f}"
 
 
+def _closest_pass(grid, ref: list, node, after: int):
+    """Tmap 경로가 after 뒤에 node 곁을 처음 지나갈 때, 그중 node에 가장 가까운 점의 번호 (없으면 None).
+    같은 곳을 두 번 지나는 코스에서 나중 번을 잡지 않도록 처음 지나가는 한 번 안에서만 고른다."""
+    hits = sorted(i for i in grid.near(node) if i >= after)
+    if not hits:
+        return None
+    first = [hits[0]]
+    for i in hits[1:]:
+        if i != first[-1] + 1:
+            break
+        first.append(i)
+    return min(first, key=lambda i: haversine_m(node, ref[i]))
+
+
+def _detoured(nodes: list, on: list, ref: list) -> list:
+    """우리 코스 구간마다: Tmap이 이 구간을 건너뛰고 '더 멀리' 돌아간 곳인가.
+
+    on[k]는 구간 k(nodes[k]→nodes[k+1])를 Tmap이 탔는지. 연달아 안 탄 구간들을 한 토막으로 보고, 토막의 시작·끝
+    노드에서 Tmap 경로가 지나간 위치를 찾아 그 사이 Tmap 길이를 우리 토막 길이와 견준다. Tmap은 경유지 사이를
+    최단거리로 잇으니, 더 길게 돌았다면 우리 길이 Tmap 지도에 없는 것이다. 더 짧으면 지름길을 탔을 뿐이다."""
+    cum_ref = [0.0]
+    for a, b in zip(ref, ref[1:]):
+        cum_ref.append(cum_ref[-1] + haversine_m(a, b))
+    grid = PointGrid(ref, MATCH_M * 2)
+    out, pointer, k = [False] * len(on), 0, 0
+    while k < len(on):
+        if on[k]:
+            k += 1
+            continue
+        start = k
+        while k < len(on) and not on[k]:
+            k += 1
+        ours = sum(haversine_m(nodes[i], nodes[i + 1]) for i in range(start, k))
+        exit_at = _closest_pass(grid, ref, nodes[start], pointer)
+        if exit_at is None:
+            continue   # Tmap이 어디서 벗어났는지 모른다 — 판단하지 않는다
+        back_at = _closest_pass(grid, ref, nodes[k], exit_at)
+        if back_at is None:
+            continue
+        pointer = back_at
+        theirs = cum_ref[back_at] - cum_ref[exit_at]
+        if theirs > ours * (1 + DETOUR_SLACK) + DETOUR_SLACK_M:
+            for i in range(start, k):
+                out[i] = True
+    return out
+
+
 def _ride_votes(graph, nodes: list, tmap_path: list) -> dict:
-    """우리 코스 밑의 길마다: Tmap 경로가 그 길 대부분을 탔으면 True, 거의 안 탔으면 False."""
+    """우리 코스 밑의 길마다: Tmap 경로가 그 길 대부분을 탔으면 True, 안 타고 더 멀리 돌아갔으면 False.
+    안 탔지만 더 짧은 길로 갔으면 아무것도 적지 않는다 (_detoured)."""
     ref = _dense(tmap_path, 10)
-    near, total = {}, {}
+    if not ref:
+        return {}
+    near_ref = PointGrid(ref, MATCH_M)
+    segments = []
     for a, b in zip(nodes, nodes[1:]):
         ways = [way for neighbour, _, way in graph.adjacent.get(a, ()) if neighbour == b]
-        if not ways:
-            continue
-        length = haversine_m(a, b)
         mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
-        on = min(haversine_m(mid, q) for q in ref) <= MATCH_M
+        segments.append((ways, haversine_m(a, b), near_ref.any_near(mid)))
+    around = _detoured(nodes, [on for _, _, on in segments], ref)
+    near, total, went_around = {}, {}, {}
+    for (ways, length, on), detour in zip(segments, around):
         for way in ways:
             total[way] = total.get(way, 0) + length
             near[way] = near.get(way, 0) + (length if on else 0)
+            went_around[way] = went_around.get(way, 0) + (length if detour else 0)
     votes = {}
     for way, length in total.items():
         share = near[way] / length
         if share >= RIDDEN_SHARE:
             votes[way] = True
-        elif share <= AVOIDED_SHARE and length >= MIN_WAY_M:
+        elif share <= AVOIDED_SHARE and length >= MIN_WAY_M and went_around[way] >= length * 0.5:
             votes[way] = False
     return votes
 

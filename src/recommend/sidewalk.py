@@ -121,6 +121,13 @@ def _connect() -> sqlite3.Connection:
     # Tmap이 이 길을 탔는지/피했는지 (tmap_follow가 쌓는다)
     db.execute("CREATE TABLE IF NOT EXISTS tmap_ways (way TEXT PRIMARY KEY, ridden INTEGER NOT NULL DEFAULT 0, "
                "avoided INTEGER NOT NULL DEFAULT 0)")
+    # '피한 길'을 적는 규칙이 바뀌었다(Tmap이 더 멀리 돌아간 경우만, tmap_follow._detoured). 예전 규칙으로 적힌 것은
+    # 더 짧은 길로 갔을 뿐인 길까지 들어 있어 코스를 망쳤다 — 한 번 지운다. 탄 길 기록은 그대로 둔다
+    db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+    if db.execute("SELECT value FROM meta WHERE key = 'avoided_rule'").fetchone() is None:
+        db.execute("UPDATE tmap_ways SET avoided = 0")
+        db.execute("INSERT OR IGNORE INTO meta VALUES ('avoided_rule', 'went-around')")   # 여러 스레드가 동시에 열 수 있다
+        db.commit()
     if fresh and os.path.exists(SEED_PATH):
         with open(SEED_PATH, encoding="utf-8") as f:
             seed = json.load(f)
