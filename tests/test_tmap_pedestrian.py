@@ -44,12 +44,26 @@ class TestRunnerFriendlyInstructions:
             "오른쪽으로 도세요", "왼쪽으로 도세요", "왼쪽으로 살짝 꺾으세요"]
 
     def test_a_nearby_place_is_used_as_the_landmark(self):
-        assert self._say(_point("우회전 후 30m 이동", 13, nearPoiName="GS25 해운대점")) == ["GS25 해운대점 앞에서 오른쪽으로 도세요"]
+        """가게는 지점 이름 없이 부른다 — 러너가 간판에서 보는 건 'GS25'다."""
+        assert self._say(_point("우회전 후 30m 이동", 13, nearPoiName="GS25 해운대점")) == ["GS25 앞에서 오른쪽으로 도세요"]
 
-    def test_the_road_to_follow_is_named_but_generic_path_words_are_not(self):
+    def test_the_road_to_turn_into_is_named_but_generic_path_words_are_not(self):
+        """어디서(가게) 어디로(들어갈 길) 도는지 한 문장으로: 'GS25 앞에서 왼쪽 구남로로 도세요'."""
         assert self._say(_point("좌회전 후 구남로를 따라 210m 이동", 12),
+                         _point("좌회전 후 구남로를 따라 210m 이동", 12, nearPoiName="GS25 해운대점"),
+                         _point("10시 방향 좌회전 후 해변길을 따라 30m 이동", 17),
                          _point("직진 후 보행자도로를 따라 80m 이동", 11)) == [
-            "왼쪽으로 도세요 · 구남로 따라", "쭉 가세요"]
+            "왼쪽 구남로로 도세요", "GS25 앞에서 왼쪽 구남로로 도세요", "왼쪽 해변길로 살짝 꺾으세요", "쭉 가세요"]
+
+    def test_the_particle_after_the_road_follows_its_last_sound(self):
+        """받침이 있으면 '으로', 없거나 ㄹ 받침이면 '로' (광장으로 · 중앙로로 · 해변길로)."""
+        assert self._say(_point("우회전 후 시민광장을 따라 40m 이동", 13), _point("우회전 후 중앙로를 따라 40m 이동", 13)) == [
+            "오른쪽 시민광장으로 도세요", "오른쪽 중앙로로 도세요"]
+
+    def test_the_landmark_and_road_are_kept_for_later(self):
+        """나중에 근처 가게를 찾아 붙일 수 있게, 문장을 만든 재료(가게·길)를 함께 남긴다."""
+        step = tmap_pedestrian.extract_steps({"features": [_point("좌회전 후 구남로를 따라 210m 이동", 12)]})[0]
+        assert step["road"] == "구남로" and step["landmark"] is None
 
     def test_crossings_and_stairs_say_what_is_ahead(self):
         assert self._say(_point("횡단보도 후 20m 이동", 211), _point("우측 횡단보도 후 15m 이동", 213),

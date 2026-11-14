@@ -86,6 +86,27 @@ def _nominatim(query: str, lat, lng, count: int) -> list:
     return places
 
 
+AROUND_URL = "https://apis.openapi.sk.com/tmap/pois/search/around"
+# 길모퉁이에서 간판으로 알아볼 만한 곳 (Tmap 업종 이름)
+AROUND_CATEGORIES = "편의점;카페;은행;약국;음식점"
+
+
+def search_around(lat: float, lng: float, count: int = 15) -> list:
+    """한 지점 둘레의 가게들 [{name, lat, lng}] — 가까운 순서. Tmap 주변(카테고리) 검색.
+    실패하면 requests 예외를 그대로 낸다(부르는 쪽이 실패를 기억하지 않게)."""
+    params = {"version": 1, "categories": AROUND_CATEGORIES, "centerLat": lat, "centerLon": lng, "radius": 1,
+              "count": count, "sort": "distance", "reqCoordType": "WGS84GEO", "resCoordType": "WGS84GEO"}
+    resp = requests.get(AROUND_URL, params=params, timeout=10,
+                        headers={"appKey": os.environ["TMAP_APP_KEY"], "Accept": "application/json"})
+    resp.raise_for_status()
+    if resp.status_code == 204 or not resp.text:
+        return []
+    return [{"name": poi["name"],
+             "lat": float(poi.get("frontLat") or poi["noorLat"]),
+             "lng": float(poi.get("frontLon") or poi["noorLon"])}
+            for poi in resp.json().get("searchPoiInfo", {}).get("pois", {}).get("poi", [])]
+
+
 def search_places(query: str, lat: float = None, lng: float = None, count: int = 6) -> list:
     """장소 후보들 [{name, address, lat, lng, category, distance_km}] — 맞을 가능성이 높은 순서.
 

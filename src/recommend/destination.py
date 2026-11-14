@@ -15,6 +15,7 @@ from ..api_clients.tmap_poi import search_places
 from ..data_collection.build_courses_from_landmarks import sample_elevation_gain
 from .route_type import attach_actual_return_path, make_roundtrip
 from .flow import junctions_per_km
+from .landmarks import add_landmarks
 from .safety import safety_index, score_components
 
 LOCAL_ROUTE_MAX_M = 8000   # 이보다 먼 목적지는 도로망을 그만큼 넓게 읽어야 해서 Tmap에 맡긴다
@@ -191,7 +192,7 @@ def course_to_destination(lat: float, lng: float, place: str = None,
         "surface": "paved",
         "safety_score": 0.7,
         "path": path,
-        "steps": assign_positions(extract_steps(route), path),
+        "steps": add_landmarks(assign_positions(extract_steps(route), path)),   # 러너에게 내보내는 코스 — 근처 가게를 붙인다
         "route_type": "oneway",
         "tags": [],
         "source": "live_generated",

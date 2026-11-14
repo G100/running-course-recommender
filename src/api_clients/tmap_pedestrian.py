@@ -95,11 +95,17 @@ def extract_steps(route_json: dict) -> list:
         if not description:
             continue
         lng, lat = f["geometry"]["coordinates"]
+        turn_type = props.get("turnType")
+        landmark = shop_name(props.get("nearPoiName"))
+        road = road_to_follow(description)
         steps.append({
             "lat": lat, "lng": lng,
             "description": description,
-            "turn_type": props.get("turnType"),
-            "instruction": runner_instruction(description, props.get("turnType"), props.get("nearPoiName")),
+            "turn_type": turn_type,
+            "instruction": runner_instruction(description, turn_type, landmark),
+            # 문장을 만든 재료 — 나중에 근처 가게를 찾아 붙일 때(landmarks.add_landmarks) 다시 쓴다
+            "landmark": landmark,
+            "road": road,
         })
     return steps
 
@@ -117,19 +123,47 @@ TURN_ACTIONS = {
 # "○○을/를 따라"에서 이름으로 부를 만하지 않은 길
 GENERIC_ROADS = {"보행자도로", "도보", "길", "보도", "인도", "산책로"}
 _FOLLOW = re.compile(r"(\S+?)(?:을|를) 따라")
+# 꺾는 방향 → (어느 쪽, 하는 말). 들어갈 길 이름을 알면 '왼쪽 구남로로 도세요'처럼 그 사이에 넣는다
+TURN_SIDES = {12: ("왼쪽", "도세요"), 13: ("오른쪽", "도세요"), 16: ("왼쪽 뒤", "크게 꺾으세요"),
+              17: ("왼쪽", "살짝 꺾으세요"), 18: ("오른쪽", "살짝 꺾으세요"), 19: ("오른쪽 뒤", "크게 꺾으세요")}
 
 
-def runner_instruction(description: str, turn_type, near_poi: str = None) -> str:
+def road_to_follow(description: str):
+    """'좌회전 후 구남로를 따라 210m 이동' → '구남로'. 이름이 없는 길(보행자도로 등)이면 None."""
+    found = _FOLLOW.search(description or "")
+    return found.group(1) if found and found.group(1) not in GENERIC_ROADS else None
+
+
+def shop_name(name):
+    """간판에서 보는 이름만: 'GS25 해운대점' → 'GS25', '맘스터치 전남대교내점' → '맘스터치'."""
+    name = re.sub(r"\(.*?\)", "", name or "").strip()
+    words = name.split()
+    if len(words) > 1 and words[-1].endswith("점"):
+        words = words[:-1]
+    return " ".join(words) or None
+
+
+def _ro(word: str) -> str:
+    """'로/으로' — 받침이 없거나 ㄹ 받침이면 '로'."""
+    last = word[-1]
+    if "가" <= last <= "힣":
+        final = (ord(last) - ord("가")) % 28
+        return "로" if final in (0, 8) else "으로"
+    return "로"
+
+
+def runner_instruction(description: str, turn_type, landmark: str = None) -> str:
     """Tmap 안내("우회전 후 보행자도로를 따라 125m 이동")를 러너가 듣기 쉬운 말로 바꾼다.
-    무엇을 할지 먼저, 근처 가게·건물이 있으면 그 앞에서, 이름 있는 길이면 그 길을 따라.
+    어디서(근처 가게) 어디로(들어갈 길) 어떻게 도는지 한 문장으로: 'GS25 앞에서 왼쪽 구남로로 도세요'.
     거리는 화면·음성이 따로 말하므로 넣지 않는다. 모르는 안내는 Tmap 문구 그대로."""
     action = TURN_ACTIONS.get(turn_type)
     if action is None:
         return description
     if turn_type in (200, 201, 11):
-        where = ""
-    else:
-        where = f"{near_poi.strip()} 앞에서 " if near_poi and near_poi.strip() else ""
-    road = _FOLLOW.search(description or "")
-    road = road.group(1) if road and road.group(1) not in GENERIC_ROADS else None
-    return f"{where}{action}" + (f" · {road} 따라" if road and turn_type not in (201, 11) else "")
+        return action
+    where = f"{landmark.strip()} 앞에서 " if landmark and landmark.strip() else ""
+    road = road_to_follow(description)
+    if road and turn_type in TURN_SIDES:
+        side, verb = TURN_SIDES[turn_type]
+        return f"{where}{side} {road}{_ro(road)} {verb}"
+    return f"{where}{action}"

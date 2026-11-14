@@ -39,6 +39,9 @@ data/osm_local/
 # Tmap으로 확인한 길별 인도 유무 (쓰면서 쌓인다)
 data/sidewalk_facts.sqlite
 
+# 회전 지점 근처 가게 이름 (Tmap 주변 검색 결과, 쓰면서 쌓인다)
+data/landmarks.sqlite
+
 # 공공 지도 데이터 원본 (국토지리정보원 등, 용량이 커서 올리지 않음)
 data/public_map/
 

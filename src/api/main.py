@@ -29,6 +29,7 @@ from ..api_clients.tmap_poi import search_places
 from ..recommend.destination import course_to_destination
 from ..recommend.freshness import stale_courses, stamp_verified
 from ..recommend.generate_live import CHOICE_OK, area_reach_m, generate_loop_candidates, generate_loop_course
+from ..recommend.landmarks import add_landmarks
 from ..recommend.location import filter_nearby
 from ..recommend.profile import resolve_target_distance_km
 from ..data_collection.enrich import haversine_m
@@ -529,7 +530,8 @@ def _deliver_on_tmap(plan: dict, target_km: float, route_type: str, regenerate) 
         return dict(plan, tmap_unchecked=unchecked)
     _, plan, route = min(tries, key=lambda t: t[0])
     path, _ = extract_path(route)
-    delivered = dict(plan, path=path, steps=assign_positions(extract_steps(route), path),
+    # 러너에게 내보내는 코스라 회전 지점마다 근처 가게를 붙인다 ('GS25 앞에서 왼쪽 용주로로 도세요')
+    delivered = dict(plan, path=path, steps=add_landmarks(assign_positions(extract_steps(route), path)),
                      distance_km=route["follow"]["distance_km"], plan_path=plan["path"], tmap=route["follow"])
     # 점수도 실제로 달리는 길로 다시 잰다: 어떤 길(차 없는 길 비율)과 갈림길 수
     if route["follow"].get("road_mix"):
@@ -599,7 +601,7 @@ def follow_course(req: FollowRequest):
         raise HTTPException(status_code=502, detail=f"Tmap 경로를 받지 못했습니다: {error}")
     path, _ = extract_path(route)
     follow = route["follow"]
-    return {"path": path, "steps": extract_steps(route), "distance_km": follow["distance_km"], "follow": follow}
+    return {"path": path, "steps": add_landmarks(extract_steps(route)), "distance_km": follow["distance_km"], "follow": follow}
 
 
 class RerouteRequest(BaseModel):

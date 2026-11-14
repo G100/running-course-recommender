@@ -46,6 +46,9 @@ def isolated_course_db(tmp_path, monkeypatch):
     # 로컬 지형 DB도 마찬가지 — 만들어 둔 PC에서만 결과가 달라지면 안 된다
     from src.data_collection import local_osm
     monkeypatch.setattr(local_osm, "DB_PATH", str(tmp_path / "osm_local.sqlite"))
+    # 회전 지점 근처 가게 저장소도 임시 파일로 (외부 호출은 아래에서 막힌다)
+    from src.recommend import landmarks
+    monkeypatch.setattr(landmarks, "DB_PATH", str(tmp_path / "landmarks.sqlite"))
     yield copy
 
 

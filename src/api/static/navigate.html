@@ -658,7 +658,7 @@ function announce(step, remainingM){
   const key = `${step.cum_m ?? step.cumDistance}|${stage}`;
   if (key === spokenKey) return;
   spokenKey = key;
-  speak(stage === 'now' ? say : `${fmtDist(remainingM)} 앞에서 ${say}`);
+  speak(stage === 'now' ? say : `${fmtDist(remainingM)} 후 ${say}`);
 }
 
 function updateTurnBanner(locatedSteps, distanceSoFarM){

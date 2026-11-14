@@ -10,6 +10,7 @@ import math
 
 from ..api_clients import tmap_pedestrian as tmap
 from ..data_collection.enrich import haversine_m
+from .landmarks import add_landmarks
 from .step_position import assign_positions, cumulative_distances
 
 REJOIN_AHEAD_M = 1000
@@ -79,7 +80,8 @@ def back_to_course(position, path: list, steps: list, progress_m: float, get_rou
         # '벗어남'이 되어 재탐색이 되풀이된다
         if haversine_m(position, detour[0]) > 1:
             detour = [list(position)] + detour
-        detour_steps = assign_positions([s for s in tmap.extract_steps(route) if s["turn_type"] not in (START, ARRIVE)], detour)
+        detour_steps = add_landmarks(assign_positions(
+            [s for s in tmap.extract_steps(route) if s["turn_type"] not in (START, ARRIVE)], detour))
     detour_m = cumulative_distances(detour)[-1]
 
     rest = [rejoin] + [p for p, at in zip(path, cum) if at > rejoin_at]
