@@ -74,6 +74,31 @@ class ServerApi(private val baseUrl: String, private val token: () -> String? = 
     fun feedbackQuestions(done: (Result<List<FeedbackQuestion>>) -> Unit) =
         call(get("/onboarding/feedback") { ChoicesJson.questions(it) }, done)
 
+    // ── 즐겨찾기 · 내 기록 ──
+
+    /** 코스를 즐겨찾기에 저장한다. 실시간으로 만든 코스는 서버 DB에 없을 수 있어 코스 내용을 통째로 보낸다. */
+    fun favorite(userId: String, course: Course, done: (Result<Unit>) -> Unit) {
+        val body = JSONObject().put("user_id", userId).put("course_id", course.id).put("course", course.raw)
+        call(post("/favorites", body, READ_SHORT_MS) { }, done)
+    }
+
+    fun unfavorite(userId: String, courseId: String, done: (Result<Unit>) -> Unit) =
+        call(send("DELETE", "/favorites/${enc(userId)}/${enc(courseId)}") { }, done)
+
+    fun favorites(userId: String, done: (Result<List<Favorite>>) -> Unit) =
+        call(get("/favorites/${enc(userId)}") { TasteJson.favorites(it) }, done)
+
+    /** 내 취향·평가 이력. 아직 평가도 취향도 없으면 서버가 404를 준다 — 빈 기록으로 본다. */
+    fun taste(userId: String, done: (Result<MyTaste>) -> Unit) = call({
+        try {
+            get("/users/${enc(userId)}/taste") { TasteJson.taste(it) }()
+        } catch (e: ServerError) {
+            if (e.status == 404) MyTaste.EMPTY else throw e
+        }
+    }, done)
+
+    private fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
+
     private fun <T> call(task: () -> T, done: (Result<T>) -> Unit) {
         worker.execute {
             val result = runCatching(task)
@@ -101,8 +126,11 @@ class ServerApi(private val baseUrl: String, private val token: () -> String? = 
         }
     }
 
-    private fun <T> get(path: String, parse: (JSONObject) -> T): () -> T = {
+    private fun <T> get(path: String, parse: (JSONObject) -> T): () -> T = send("GET", path, parse)
+
+    private fun <T> send(method: String, path: String, parse: (JSONObject) -> T): () -> T = {
         val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
+            requestMethod = method
             connectTimeout = CONNECT_MS
             readTimeout = READ_SHORT_MS
             authHeaders(token()).forEach { (k, v) -> setRequestProperty(k, v) }

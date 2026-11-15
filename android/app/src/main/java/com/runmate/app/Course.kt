@@ -27,7 +27,9 @@ data class Course(
 )
 
 /** 추천 한 건: 코스와 점수(0~1), 항목별 점수(추천 이유를 보여 줄 때 쓴다). */
-data class Recommendation(val course: Course, val score: Double, val breakdown: Map<String, Double> = emptyMap())
+data class Recommendation(val course: Course, val score: Double, val breakdown: Map<String, Double> = emptyMap(),
+                          /** 내가 즐겨찾기한 코스인가 (user_id를 보냈을 때 서버가 알려 준다) */
+                          val favorite: Boolean = false)
 
 /** POST /recommend 응답. */
 data class Recommendations(
@@ -45,7 +47,8 @@ object CourseJson {
         return Recommendations(
             results = (0 until results.length()).map { i ->
                 val item = results.getJSONObject(i)
-                Recommendation(course(item.getJSONObject("course")), item.optDouble("score", 0.0), breakdown(item.optJSONObject("score_breakdown")))
+                Recommendation(course(item.getJSONObject("course")), item.optDouble("score", 0.0), breakdown(item.optJSONObject("score_breakdown")),
+                    item.optBoolean("favorite", false))
             },
             deliverKm = body.optDouble("deliver_km").takeUnless { it.isNaN() },
             notice = body.optString("notice").takeIf { it.isNotBlank() && it != "null" },

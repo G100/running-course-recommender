@@ -58,6 +58,13 @@ class RunState(val username: String) {
     var rating by mutableStateOf<Rating?>(null)
     var taste by mutableStateOf<List<String>>(emptyList())
 
+    // 즐겨찾기 · 내 기록
+    val savedIds = mutableStateListOf<String>()          // 내가 즐겨찾기한 코스 id (코스 카드의 별)
+    var showRecords by mutableStateOf(false)
+    var records by mutableStateOf<MyTaste?>(null)        // null = 불러오는 중
+    var favorites by mutableStateOf<List<Favorite>?>(null)
+    var recordsError by mutableStateOf<String?>(null)
+
     val course: Course? get() = results.getOrNull(picked)?.course
     val pick: Recommendation? get() = results.getOrNull(picked)
 }

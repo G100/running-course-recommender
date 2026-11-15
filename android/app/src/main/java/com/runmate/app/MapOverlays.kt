@@ -75,6 +75,7 @@ class MapActions(
     val recenter: () -> Unit,
     val sendRating: () -> Unit,
     val skipRating: () -> Unit,
+    val toggleFavorite: () -> Unit,
 )
 
 private val floatShape = RoundedCornerShape(32.dp)
@@ -104,17 +105,21 @@ fun BoxScope.CourseSheet(state: RunState, actions: MapActions) {
             if (state.results.size > 1) CourseOptions(state, actions)
             AnimatedContent(course.id, transitionSpec = { fadeIn(tween(250)).togetherWith(fadeOut(tween(150))) }, label = "course") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Column {
-                        Text(course.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Run.ink, lineHeight = 23.sp,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        val reasons = recommendReasons(pick.breakdown)
-                        if (reasons.isNotEmpty()) Text(reasons.joinToString(" · "), fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                            color = Run.mute, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(course.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Run.ink, lineHeight = 23.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val reasons = recommendReasons(pick.breakdown)
+                            if (reasons.isNotEmpty()) Text(reasons.joinToString(" · "), fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                                color = Run.mute, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        FavoriteStar(course.id in state.savedIds) { actions.toggleFavorite() }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
                         Stat(course.distanceKm, if (course.joinedOnTmap) "km" else "km(대략)", decimals = 2, key = course.id)
                         course.signals?.let { Stat(it.toDouble(), "신호등", decimals = 0, key = course.id) }
-                        Stat(pick.score * 100, "점수/100", decimals = 0, key = course.id)
+                        if (pick.score >= 0) Stat(pick.score * 100, "점수/100", decimals = 0, key = course.id)   // 즐겨찾기에서 연 코스는 점수가 없다
                     }
                 }
             }
@@ -132,6 +137,18 @@ fun BoxScope.CourseSheet(state: RunState, actions: MapActions) {
             }
         }
     }
+}
+
+/** 즐겨찾기 별: 누르면 저장(파란 판에 흰 별), 다시 누르면 뺀다. 바뀔 때 통 튄다 */
+@Composable
+private fun FavoriteStar(saved: Boolean, onClick: () -> Unit) {
+    val bg by animateColorAsState(if (saved) Run.accent else Run.top, tween(200), label = "favBg")
+    val pop = remember { Animatable(1f) }
+    LaunchedEffect(saved) { pop.snapTo(0.75f); pop.animateTo(1f, spring(dampingRatio = 0.35f, stiffness = 500f)) }
+    Box(
+        Modifier.size(44.dp).scale(pop.value).clip(CircleShape).background(bg).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Text(if (saved) "★" else "☆", fontSize = 20.sp, color = if (saved) Color.White else Run.ink) }
 }
 
 /** 후보 고르기: 카드 맨 위 알약 줄. 고른 코스만 진한 알약 */

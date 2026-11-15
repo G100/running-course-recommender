@@ -23,7 +23,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -81,7 +83,8 @@ class MainActivity : ComponentActivity() {
         setUpMap()
         tts = TextToSpeech(this) { ok -> if (ok == TextToSpeech.SUCCESS) tts?.language = Locale.KOREAN }
 
-        val ask = AskActions(find = ::find, searchPlace = ::searchPlace, logOut = ::logOut)
+        val ask = AskActions(find = ::find, searchPlace = ::searchPlace, logOut = ::logOut, openRecords = ::openRecords)
+        val records = RecordsActions(close = { state.showRecords = false }, run = ::runFavorite, remove = ::removeFavorite)
         val onMap = MapActions(
             pick = ::pick, edit = ::edit, startGuide = ::startGuide, stopGuide = ::stopGuide,
             toggleVoice = { state.voiceOn = !state.voiceOn; if (!state.voiceOn) tts?.stop() },
@@ -92,6 +95,7 @@ class MainActivity : ComponentActivity() {
                 if (running != null && at != null) followRunner(at, running, ms = 600)
             },
             sendRating = ::sendRating, skipRating = { state.rating = null; stopGuide() },
+            toggleFavorite = ::toggleFavorite,
         )
         setContent {
             Box(Modifier.fillMaxSize().background(Run.bg)) {
@@ -114,8 +118,15 @@ class MainActivity : ComponentActivity() {
                     enter = fadeIn(tween(250)) + slideInVertically(tween(320)) { it / 12 },
                     exit = fadeOut(tween(300)) + slideOutVertically(tween(320)) { -it / 12 },
                 ) { AskScreen(state, ask) }
+                // 내 기록: 오른쪽에서 밀려 들어온다
+                AnimatedVisibility(
+                    state.showRecords,
+                    enter = slideInHorizontally(tween(320)) { it } + fadeIn(tween(200)),
+                    exit = slideOutHorizontally(tween(280)) { it } + fadeOut(tween(200)),
+                ) { RecordsScreen(state, records) }
             }
-            BackHandler(enabled = state.phase != Phase.Ask || state.step > 0) {
+            BackHandler(enabled = state.showRecords || state.phase != Phase.Ask || state.step > 0) {
+                if (state.showRecords) return@BackHandler run { state.showRecords = false }
                 when (state.phase) {
                     Phase.Ask -> state.step -= 1
                     Phase.Course -> edit()
@@ -450,6 +461,7 @@ class MainActivity : ComponentActivity() {
             result.onSuccess { found ->
                 if (found.results.isEmpty()) return@onSuccess show(getString(R.string.no_results))
                 state.results = found.results
+                found.results.forEach { r -> if (r.favorite && r.course.id !in state.savedIds) state.savedIds += r.course.id }
                 state.deliverKm = found.deliverKm ?: state.distanceKm
                 state.notice = found.notice
                 state.attribution = found.attribution
@@ -477,6 +489,63 @@ class MainActivity : ComponentActivity() {
                 state.results = state.results.toMutableList().also { it[index] = chosen.copy(course = delivered) }
                 if (state.picked == index) drawCourse(delivered)
             }.onFailure { show("실제 길로 맞추지 못해 설계한 코스를 보여 드려요: ${it.message}") }
+        }
+    }
+
+    // ── 즐겨찾기 · 내 기록 ──
+
+    /** 코스 카드의 별: 바로 바꿔 보여 주고, 서버가 거절하면 되돌린다 */
+    private fun toggleFavorite() {
+        val course = state.course ?: return
+        val saved = course.id in state.savedIds
+        if (saved) state.savedIds -= course.id else state.savedIds += course.id
+        val done: (Result<Unit>) -> Unit = { result ->
+            result.onSuccess { show(if (saved) "즐겨찾기에서 뺐어요" else "즐겨찾기에 담았어요. 메뉴의 '내 기록'에서 다시 달릴 수 있어요", 2_500) }
+                .onFailure {
+                    if (saved) state.savedIds += course.id else state.savedIds -= course.id
+                    if (needsLoginAgain(it)) return@onFailure goToLogin(getString(R.string.login_again))
+                    show("즐겨찾기를 바꾸지 못했어요: ${(it as? ServerError)?.detail ?: it.message}")
+                }
+        }
+        if (saved) api.unfavorite(userId(), course.id, done) else api.favorite(userId(), course, done)
+    }
+
+    private fun openRecords() {
+        state.showRecords = true
+        state.records = null
+        state.favorites = null
+        state.recordsError = null
+        api.taste(userId()) { result ->
+            result.onSuccess { state.records = it }.onFailure { state.recordsError = "기록을 불러오지 못했어요: ${it.message}" }
+        }
+        api.favorites(userId()) { result ->
+            result.onSuccess { list ->
+                state.favorites = list
+                list.forEach { f -> if (f.course.id !in state.savedIds) state.savedIds += f.course.id }
+            }.onFailure { state.favorites = emptyList(); state.recordsError = "즐겨찾기를 불러오지 못했어요: ${it.message}" }
+        }
+    }
+
+    /** 즐겨찾기한 코스를 그대로 띄운다 (저장할 때의 실제 경로 그대로 — 바로 안내를 시작할 수 있다) */
+    private fun runFavorite(fav: Favorite) {
+        state.results = listOf(Recommendation(fav.course, score = -1.0, favorite = true))
+        state.picked = 0
+        state.deliverKm = fav.course.distanceKm
+        state.notice = null
+        state.showRecords = false
+        state.phase = Phase.Course
+        drawCourse(fav.course)
+    }
+
+    private fun removeFavorite(fav: Favorite) {
+        state.favorites = state.favorites?.filterNot { it.course.id == fav.course.id }
+        state.savedIds -= fav.course.id
+        api.unfavorite(userId(), fav.course.id) { result ->
+            result.onFailure {
+                state.favorites = (state.favorites ?: emptyList()) + fav
+                state.savedIds += fav.course.id
+                show("즐겨찾기에서 빼지 못했어요: ${(it as? ServerError)?.detail ?: it.message}")
+            }
         }
     }
 

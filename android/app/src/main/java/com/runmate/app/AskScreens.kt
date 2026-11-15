@@ -110,6 +110,7 @@ class AskActions(
     val find: () -> Unit,
     val searchPlace: (String, (List<Place>) -> Unit) -> Unit,
     val logOut: () -> Unit,
+    val openRecords: () -> Unit,
 )
 
 /** 한 화면에 질문 하나씩: ① 거리 → ② 모양 → ③ 풍경 → 코스 찾기 (웹 데모의 폰 시작 화면과 같다). */
@@ -178,6 +179,7 @@ private fun TopRow(state: RunState, actions: AskActions) {
             )
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(text = { Text("${state.username} 계정", color = Run.mute) }, onClick = { menu = false }, enabled = false)
+                DropdownMenuItem(text = { Text("내 기록 · 즐겨찾기") }, onClick = { menu = false; actions.openRecords() })
                 DropdownMenuItem(text = { Text("로그아웃") }, onClick = { menu = false; actions.logOut() })
             }
         }
