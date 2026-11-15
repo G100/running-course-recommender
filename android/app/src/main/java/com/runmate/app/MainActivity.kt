@@ -607,12 +607,19 @@ class MainActivity : ComponentActivity() {
             (here ?: course.path.firstOrNull())?.let { followRunner(it, running, ms = 1200) }
         }
         if (uncheckedText(course) != null) say("Tmap으로 길을 확인하지 못한 코스입니다. 달리면서 길을 살펴 주세요.", false)
+        // 튀는 위치는 안내·화살표에 넣지 않는다 (속도는 안내 시계로 잰다 — 개발용 빨리 감기에서도 같은 기준이 되게)
+        val filter = GpsFilter()
         val listener = LocationListener { location ->
             if (guide !== running) return@LocationListener
-            lastFixMs = System.currentTimeMillis()
+            lastFixMs = System.currentTimeMillis()   // 신호는 있다 (걸러 낸 위치여도 'GPS 신호 없음'은 아니다)
             val at = LatLng(location.latitude, location.longitude)
+            val now = guideClock(running.startedAt)
+            if (!filter.accept(at, if (location.hasAccuracy()) location.accuracy else null, now)) {
+                if (BuildConfig.DEBUG) android.util.Log.d("RunGps", "버림 ${at.lat},${at.lng} 정확도 ${location.accuracy}")
+                return@LocationListener
+            }
             lastRunner = at
-            handle(running, running.onLocation(at, guideClock(running.startedAt)))
+            handle(running, running.onLocation(at, now))
             followRunner(at, running)   // 진행 거리가 갱신된 뒤에 앞길 방향을 잡는다
         }
         gpsListener = listener
