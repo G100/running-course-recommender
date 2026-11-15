@@ -39,6 +39,29 @@ class GuideTest {
         assertFalse("직진 안내는 말하지 않는다", words.any { "직진" in it })
     }
 
+    /** 북쪽으로 곧게 1km. 500m에 왼쪽, 그 gap m 뒤에 오른쪽. */
+    private fun twoTurns(gap: Double): Course {
+        val path = (0..100).map { LatLng(35.0 + it * 10 * m, 127.0) }
+        val steps = listOf(
+            Step(LatLng(35.0 + 500 * m, 127.0), "왼쪽으로 도세요", 12, 500.0),
+            Step(LatLng(35.0 + (500 + gap) * m, 127.0), "오른쪽 용주로로 도세요", 13, 500.0 + gap),
+        )
+        return Course("c", "곧은 길", path, steps, 1.0, 1, null, true, null, JSONObject())
+    }
+
+    @Test fun a_turn_right_after_another_is_said_together_with_it() {
+        // 광주 용봉동: '왼쪽으로 도세요'가 20~30m마다 연달아 나왔다. 두 번째는 예고 없이 갑자기 들렸다
+        val words = run(Guide(twoTurns(30.0), 0), 0, 560)
+        assertTrue(words.toString(), words.any { it.endsWith("m 후 왼쪽으로 도세요. 이어서 바로 오른쪽 용주로로 도세요") })
+        assertTrue(words.toString(), "왼쪽으로 도세요. 이어서 바로 오른쪽 용주로로 도세요" in words)
+        assertEquals("두 번째 회전은 그 자리에서 다시 말한다", "오른쪽 용주로로 도세요", words.last())
+    }
+
+    @Test fun turns_far_apart_are_said_separately() {
+        val words = run(Guide(twoTurns(200.0), 0), 0, 720)
+        assertFalse(words.toString(), words.any { "이어서" in it })
+    }
+
     @Test fun a_lap_change_is_said_once_when_passing_without_a_distance() {
         val guide = Guide(straightKm(), 0)
         val words = run(guide, 0, 820).filter { "바퀴" in it }

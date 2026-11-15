@@ -638,9 +638,11 @@ function speak(text, interrupt=false){
   window.speechSynthesis.speak(utter);
 }
 
-function announce(step, remainingM){
+const CHAIN_M = 50;   // 이 안에 다음 회전이 있으면 앞 회전과 함께 말한다 (앱 Guide.kt와 같은 규칙)
+function announce(step, remainingM, after){
   // 같은 안내를 거리만 줄여가며 반복해서 읽으면 시끄럽다. 안내당 두 번만 말한다:
   // 멀리서 미리 한 번(예고), 코앞에서 한 번(실행).
+  // 바로 뒤(CHAIN_M 안)에 또 도는 곳이 있으면 함께 말한다 — '왼쪽으로 도세요. 이어서 바로 오른쪽 용주로로 도세요'
   const stage = simulatedNavigation
     ? (remainingM <= 180 ? 'soon' : null)
     : (remainingM <= 30 ? 'now' : (remainingM <= 180 ? 'soon' : null));
@@ -658,7 +660,10 @@ function announce(step, remainingM){
   const key = `${step.cum_m ?? step.cumDistance}|${stage}`;
   if (key === spokenKey) return;
   spokenKey = key;
-  speak(stage === 'now' ? say : `${fmtDist(remainingM)} 후 ${say}`);
+  const chained = after && ![201, LAP_TURN, 11].includes(after.turn_type)
+    && after.cumDistance - step.cumDistance <= CHAIN_M
+    ? `. 이어서 바로 ${after.instruction || after.description}` : '';
+  speak((stage === 'now' ? say : `${fmtDist(remainingM)} 후 ${say}`) + chained);
 }
 
 function updateTurnBanner(locatedSteps, distanceSoFarM){
@@ -680,7 +685,7 @@ function updateTurnBanner(locatedSteps, distanceSoFarM){
   setTurnArrow(document.getElementById('turnArrow'), next);
   document.getElementById('turnDist').textContent = fmtDist(remainingM);
   document.getElementById('turnStreet').textContent = next.instruction || next.description;
-  announce(next, remainingM);
+  announce(next, remainingM, after);
 
   if (after){
     secondary.hidden = false;

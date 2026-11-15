@@ -141,11 +141,15 @@ class Guide(course: Course, val startedAt: Long) {
         val ahead = steps.filter { (it.cumM ?: 0.0) > progressM + 0.5 && it.turnType != STRAIGHT }
         val next = ahead.firstOrNull() ?: return GuideAction.Banner(null, 0.0, null) to null
         val remaining = (next.cumM ?: 0.0) - progressM
-        return GuideAction.Banner(next, remaining, ahead.getOrNull(1)) to announce(next, remaining)
+        return GuideAction.Banner(next, remaining, ahead.getOrNull(1)) to announce(next, remaining, ahead.getOrNull(1))
     }
 
-    /** 회전 안내를 말할 때인가 (예고·실행 두 번만). */
-    private fun announce(step: Step, remainingM: Double): GuideAction.Say? {
+    /**
+     * 회전 안내를 말할 때인가 (예고·실행 두 번만). 바로 뒤(CHAIN_M 안)에 또 도는 곳이 있으면 함께 말한다 —
+     * '왼쪽으로 도세요. 이어서 바로 오른쪽 용주로로 도세요' (광주 용봉동: 20~30m마다 연달아 돌아서, 두 번째는
+     * 예고 없이 갑자기 들렸다). 두 번째 회전은 그 자리에서 다시 말한다.
+     */
+    private fun announce(step: Step, remainingM: Double, after: Step? = null): GuideAction.Say? {
         val stage = when {
             remainingM <= NOW_M -> "now"
             remainingM <= SOON_M -> "soon"
@@ -169,7 +173,10 @@ class Guide(course: Course, val startedAt: Long) {
         val key = "${step.cumM}|$stage"
         if (key == spokenKey) return null
         spokenKey = key
-        return GuideAction.Say(if (stage == "now") step.instruction else "${distanceText(remainingM)} 후 ${step.instruction}")
+        val then = after?.takeIf {
+            it.turnType !in setOf(FINISH, LAP_TURN, STRAIGHT) && (it.cumM ?: 0.0) - (step.cumM ?: 0.0) <= CHAIN_M
+        }?.let { ". 이어서 바로 ${it.instruction}" } ?: ""
+        return GuideAction.Say((if (stage == "now") step.instruction else "${distanceText(remainingM)} 후 ${step.instruction}") + then)
     }
 
     companion object {
@@ -180,6 +187,7 @@ class Guide(course: Course, val startedAt: Long) {
         const val FASTEST_PACE_MIN_PER_KM = 2.5   // 사람이 이보다 빨리 달릴 수는 없다 (마라톤 세계 기록 약 2.9분/km)
         const val SOON_M = 180.0
         const val NOW_M = 30.0
+        const val CHAIN_M = 50.0   // 이 안에 다음 회전이 있으면 앞 회전과 함께 말한다 (달려도 15초 남짓)
         const val STRAIGHT = 11
         const val FINISH = 201     // Tmap의 도착 지점 안내
         const val COMPLETE_SHARE = 0.8   // 원래 코스의 이만큼은 달려야 완주로 친다
