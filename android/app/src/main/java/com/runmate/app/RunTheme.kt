@@ -1,10 +1,12 @@
 package com.runmate.app
 
-import android.graphics.Typeface
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -26,8 +28,14 @@ object Run {
     val coralSoft = Color(0x1FFF6B4A)
     val shadow = Color(0x2410142A)
 
-    /** 큰 숫자: 웹은 Big Shoulders Display. 폰에는 같은 결의 좁고 굵은 글꼴(sans-serif-condensed)을 쓴다 */
-    val num = FontFamily(Typeface.create("sans-serif-condensed", Typeface.BOLD))
+    /** 큰 숫자: 웹과 같은 Big Shoulders Display (굵기 조절 글꼴 하나로 700·800·900을 쓴다).
+     *  SIL 오픈 폰트 라이선스 — 허락서는 assets/licenses/BigShouldersDisplay-OFL.txt */
+    @OptIn(ExperimentalTextApi::class)
+    val num = FontFamily(
+        Font(R.font.big_shoulders_display, FontWeight.Bold, variationSettings = FontVariation.Settings(FontVariation.weight(700))),
+        Font(R.font.big_shoulders_display, FontWeight.ExtraBold, variationSettings = FontVariation.Settings(FontVariation.weight(800))),
+        Font(R.font.big_shoulders_display, FontWeight.Black, variationSettings = FontVariation.Settings(FontVariation.weight(900))),
+    )
 
     val question = TextStyle(fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 39.sp, letterSpacing = (-0.8).sp, color = ink)
     val sub = TextStyle(fontSize = 14.sp, color = mute, lineHeight = 20.sp)
