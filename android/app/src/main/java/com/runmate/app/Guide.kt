@@ -32,7 +32,9 @@ class Guide(course: Course, val startedAt: Long) {
     private var total = cum.last()
     private val requiredMs = (total / 1000 * FASTEST_PACE_MIN_PER_KM * 60_000).toLong()
     private val courseM = total          // 원래 코스 길이 (재탐색해도 바뀌지 않는다)
-    private var ranM = 0.0               // 경로를 따라 실제로 나아간 거리 (재탐색 전후를 합친다)
+    /** 경로를 따라 실제로 나아간 거리 (재탐색 전후를 합친다) */
+    var ranM = 0.0
+        private set
     private var started = false
 
     /** 경로를 따라 지금까지 온 거리 (뒤로는 가지 않는다). */

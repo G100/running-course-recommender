@@ -592,6 +592,7 @@ class MainActivity : ComponentActivity() {
         lastStatus = null
         state.phase = Phase.Guiding
         state.arrived = false
+        state.finishKm = null
         state.banner = null
         state.eta = null
         state.following = true
@@ -662,8 +663,10 @@ class MainActivity : ComponentActivity() {
             is GuideAction.Remaining -> showRemaining(action.meters)
             is GuideAction.Arrived -> {
                 endGps()
+                state.finishKm = running.ranM / 1000
+                state.finishSeconds = (guideClock(running.startedAt) - running.startedAt) / 1000
                 state.arrived = true
-                if (action.completed) lifecycleScope.launch { delay(1_800); askRating() }
+                if (action.completed) lifecycleScope.launch { delay(3_200); askRating() }   // 도착 판의 거리·시간을 볼 틈을 준다
                 else show("도착했어요. 코스를 80% 넘게 달린 뒤에 평가할 수 있어요.", 8_000)
             }
         }

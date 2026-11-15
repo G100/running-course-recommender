@@ -87,6 +87,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
@@ -484,6 +485,26 @@ private fun DestinationBox(state: RunState, actions: AskActions) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ColumnScope.SceneryStep(state: RunState, actions: AskActions) {
+    // 코스를 찾는 동안(10초~1분)에는 고르던 화면 대신 동네 길 위에 코스가 그려지는 장면을 보여 준다
+    Box(Modifier.weight(1f).fillMaxWidth()) {
+        androidx.compose.animation.AnimatedVisibility(!state.finding, enter = fadeIn(tween(300)), exit = fadeOut(tween(200))) {
+            Column(Modifier.fillMaxSize()) { SceneryChoices(state) }
+        }
+        androidx.compose.animation.AnimatedVisibility(state.finding, enter = fadeIn(tween(400)), exit = fadeOut(tween(200))) {
+            FindingScene(state)
+        }
+    }
+    Spacer(Modifier.height(12.dp))
+    val shape = SHAPES.first { it.first == state.routeType }.second
+    val picked = if (state.chosen.isEmpty()) "풍경 상관없음" else "풍경 ${state.chosen.size}개"
+    Text("${Distance.label(state.distanceKm)} · $shape · $picked", fontSize = 13.sp, color = Run.mute, textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp))
+    FindButton(state, actions.find)
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ColumnScope.SceneryChoices(state: RunState) {
     Question("어디를\n지나고 싶어요?", "근처에 실제로 있는 풍경만 보여드려요. 안 골라도 돼요.")
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
         if (state.scenery.isEmpty()) {
@@ -511,12 +532,114 @@ private fun ColumnScope.SceneryStep(state: RunState, actions: AskActions) {
         }
         if (state.scenery.isNotEmpty()) Text("고른 풍경을 지나는 코스를 먼저 찾아요.", fontSize = 13.sp, color = Run.mute, modifier = Modifier.padding(top = 12.dp))
     }
-    Spacer(Modifier.height(12.dp))
-    val shape = SHAPES.first { it.first == state.routeType }.second
-    val picked = if (state.chosen.isEmpty()) "풍경 상관없음" else "풍경 ${state.chosen.size}개"
-    Text("${Distance.label(state.distanceKm)} · $shape · $picked", fontSize = 13.sp, color = Run.mute, textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp))
-    FindButton(state, actions.find)
+}
+
+// ── 코스를 찾는 동안: 동네 길(기울어진 격자) 위에 고른 모양의 코스가 그려지고, 다 그리면 사라졌다 다른 길로 다시 ──
+
+@Composable
+private fun FindingScene(state: RunState) {
+    Column(Modifier.fillMaxSize()) {
+        Question("코스를\n그리는 중이에요", "실제로 달릴 길로 ±5% 안에 맞추고 있어요. 긴 코스는 1분 넘게 걸릴 수 있어요.")
+        val ambient = rememberInfiniteTransition(label = "finding")
+        val breathe by ambient.animateFloat(0f, 1f, infiniteRepeatable(tween(5200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "breathe")
+        val pulse by ambient.animateFloat(0f, 1f, infiniteRepeatable(tween(1100, easing = LinearEasing), RepeatMode.Restart), label = "pulse")
+        val draw = remember { Animatable(0f) }
+        val fade = remember { Animatable(1f) }
+        var attempt by remember { mutableIntStateOf(0) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                draw.snapTo(0f); fade.snapTo(1f)
+                draw.animateTo(1f, tween(2400, easing = FastOutSlowInEasing))
+                delay(600)
+                fade.animateTo(0f, tween(320))
+                attempt++
+            }
+        }
+        val kind = state.routeType
+        Canvas(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Run.top)) {
+            val cell = 46.dp.toPx()
+            val c = center
+            scale(1f + 0.035f * breathe, pivot = c) {
+                rotate(-14f, pivot = c) {
+                    val n = (size.maxDimension / cell).toInt() + 2
+                    // 큰길(굵고 옅은 띠) 위에 골목(가는 선)
+                    for (i in -n..n) {
+                        val big = i % 3 == 0
+                        val w = if (big) 10.dp.toPx() else 1.5.dp.toPx()
+                        val color = if (big) Color.White else Run.line
+                        drawLine(color, Offset(c.x + i * cell, c.y - n * cell), Offset(c.x + i * cell, c.y + n * cell), w)
+                        drawLine(color, Offset(c.x - n * cell, c.y + i * cell), Offset(c.x + n * cell, c.y + i * cell), w)
+                    }
+                    val maxX = ((size.width / 2) / cell).toInt().coerceAtLeast(2) - 1
+                    val maxY = ((size.height / 2) / cell).toInt().coerceAtLeast(2) - 1
+                    val pts = routeCells(kind, attempt, maxX.coerceIn(2, 3), maxY.coerceIn(2, 3))
+                    val path = Path().apply {
+                        pts.forEachIndexed { i, (gx, gy) ->
+                            val o = Offset(c.x + gx * cell, c.y + gy * cell)
+                            if (i == 0) moveTo(o.x, o.y) else lineTo(o.x, o.y)
+                        }
+                    }
+                    val measure = PathMeasure().apply { setPath(path, false) }
+                    val length = measure.length
+                    val line = Stroke(6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    val p = draw.value
+                    // 왕복은 끝까지 갔다가(파랑) 같은 길로 돌아온다(코랄)
+                    val outShare = if (kind == "roundtrip") (p * 2).coerceAtMost(1f) else p
+                    val out = Path().also { measure.getSegment(0f, length * outShare, it, true) }
+                    drawPath(out, Run.accent.copy(alpha = fade.value), style = line)
+                    var head = measure.getPosition(length * outShare)
+                    if (kind == "roundtrip" && p > 0.5f) {
+                        val back = (p - 0.5f) * 2
+                        val trail = Path().also { measure.getSegment(length * (1 - back), length, it, true) }
+                        drawPath(trail, Run.coral.copy(alpha = fade.value), style = Stroke(3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+                        head = measure.getPosition(length * (1 - back))
+                    }
+                    // 출발점
+                    val start = Offset(c.x + pts[0].first * cell, c.y + pts[0].second * cell)
+                    drawCircle(Run.ink.copy(alpha = fade.value), 7.dp.toPx(), start)
+                    drawCircle(Color.White.copy(alpha = fade.value), 3.dp.toPx(), start)
+                    // 달리는 점: 퍼지는 고리 + 흰 테두리 파란 점
+                    drawCircle(Run.accent.copy(alpha = 0.35f * (1 - pulse) * fade.value), 8.dp.toPx() + 18.dp.toPx() * pulse, head)
+                    drawCircle(Color.White.copy(alpha = fade.value), 10.dp.toPx(), head)
+                    drawCircle(Run.accent.copy(alpha = fade.value), 7.dp.toPx(), head)
+                }
+            }
+        }
+    }
+}
+
+/** 격자 칸 좌표로 그린 코스 (가운데가 0,0). 다시 그릴 때마다 다른 블록을 돈다. */
+private fun routeCells(kind: String, seed: Int, ax: Int, ay: Int): List<Pair<Float, Float>> {
+    val rng = java.util.Random(seed * 7919L + kind.hashCode())
+    val a = (ax - rng.nextInt(2)).coerceAtLeast(2).toFloat()
+    val b = (ay - rng.nextInt(2)).coerceAtLeast(2).toFloat()
+    return when (kind) {
+        "loop" -> buildList {
+            add(0f to b); add(-a to b)
+            // 왼쪽 변에 한 칸 들어간 골목
+            if (rng.nextBoolean()) { add(-a to 0f); add(-a + 1 to 0f); add(-a + 1 to -1f); add(-a to -1f) }
+            add(-a to -b)
+            val notch = (rng.nextInt(a.toInt() * 2 - 1) - a.toInt() + 1).toFloat()
+            if (rng.nextBoolean()) { add(notch to -b); add(notch to -b + 1); add(notch + 1 to -b + 1); add(notch + 1 to -b) }
+            add(a to -b); add(a to b); add(0f to b)
+        }
+        "roundtrip" -> buildList {
+            var x = 0f; var y = b
+            add(x to y)
+            while (y > -b) {
+                y = (y - 1 - rng.nextInt(2)).coerceAtLeast(-b); add(x to y)
+                if (y > -b) { x = (x + if (rng.nextBoolean()) 1 else -1).coerceIn(-a, a); add(x to y) }
+            }
+        }
+        else -> buildList {
+            var x = -a; var y = b
+            add(x to y)
+            while (x < a || y > -b) {
+                if (y > -b && (x >= a || rng.nextBoolean())) y -= 1 else x += 1
+                add(x to y)
+            }
+        }
+    }
 }
 
 /** 코스 찾기: 찾는 동안 버튼 위로 빛줄기가 흐르고 걸린 초를 센다 (긴 코스는 1~2분 걸린다) */

@@ -5,6 +5,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -269,13 +274,18 @@ fun BoxScope.GuideOverlays(state: RunState, actions: MapActions) {
         }
     }
 
-    // 도착: 가운데 파란 판이 튀어나온다
+    // 도착: 색종이가 터지고 가운데 파란 판이 튀어나온다. 판 아래쪽에 달린 거리·시간이 0부터 올라간다
+    if (guiding && state.arrived) Confetti(Modifier.matchParentSize())
     AnimatedVisibility(guiding && state.arrived && state.rating == null,
         enter = scaleIn(spring(dampingRatio = 0.45f, stiffness = 300f), initialScale = 0.6f) + fadeIn(),
         exit = scaleOut(targetScale = 0.9f) + fadeOut(), modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp)) {
-        Text("도착했어요", textAlign = TextAlign.Center,
-            style = TextStyle(fontFamily = Run.num, fontWeight = FontWeight.ExtraBold, fontSize = 56.sp, lineHeight = 56.sp, color = Color.White),
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Run.accent).padding(28.dp))
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Run.accent).padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            // 한글은 기본 글꼴로 그려져 폭이 넓다 — 한 줄에 들어가는 크기로
+            Text("도착했어요", textAlign = TextAlign.Center, maxLines = 1, softWrap = false,
+                style = TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = 44.sp, lineHeight = 48.sp, color = Color.White))
+            state.finishKm?.let { km -> FinishStats(km, state.finishSeconds) }
+        }
     }
 
     // 평가
@@ -291,7 +301,17 @@ private fun TurnCard(banner: GuideAction.Banner) {
     Box(Modifier.fillMaxWidth().floating(RoundedCornerShape(24.dp)).padding(start = 20.dp, end = 20.dp, top = 30.dp, bottom = 16.dp)) {
         Text("달리기", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Run.mute, modifier = Modifier.padding(top = 0.dp).align(Alignment.TopStart).padding(bottom = 0.dp))
         Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            TurnArrow(next, Modifier.size(56.dp), stroke = 6f)
+            // 지금 돌 곳(30m 안)이면 화살표 뒤로 고리가 퍼진다 — 소리를 꺼 둬도 '지금'인 걸 알게
+            val near = banner.remainingM <= Guide.NOW_M
+            val ring = rememberInfiniteTransition(label = "turnNow")
+            val p by ring.animateFloat(0f, 1f, infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Restart), label = "ring")
+            val pop by animateFloatAsState(if (near) 1.12f else 1f, spring(dampingRatio = 0.4f, stiffness = 500f), label = "pop")
+            Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+                if (near) Canvas(Modifier.size(56.dp)) {
+                    drawCircle(Run.accent.copy(alpha = 0.32f * (1 - p)), size.minDimension / 2 * (0.7f + 0.6f * p))
+                }
+                TurnArrow(next, Modifier.size(56.dp).scale(pop), stroke = 6f)
+            }
             Spacer(Modifier.width(16.dp))
             Column {
                 RollingNumber(Guide.distanceText(banner.remainingM),
@@ -380,5 +400,67 @@ private fun RateCard(rating: Rating, actions: MapActions) {
         Text("평가할수록 다음 추천이 내 취향에 맞춰집니다", fontSize = 13.sp, color = Run.mute, modifier = Modifier.padding(top = 8.dp))
         Text("나중에 하기", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Run.mute,
             modifier = Modifier.padding(top = 6.dp).clickable(onClick = actions.skipRating).padding(8.dp))
+    }
+}
+
+/** 도착 판 아래: 실제로 나아간 거리와 걸린 시간이 0부터 올라간다 */
+@Composable
+private fun FinishStats(km: Double, seconds: Long) {
+    val p = remember { Animatable(0f) }
+    LaunchedEffect(km, seconds) { kotlinx.coroutines.delay(250); p.animateTo(1f, tween(1100, easing = FastOutSlowInEasing)) }
+    val shownKm = km * p.value
+    val shownS = (seconds * p.value).toLong()
+    val time = if (shownS >= 3600) "%d:%02d:%02d".format(shownS / 3600, shownS / 60 % 60, shownS % 60) else "%d:%02d".format(shownS / 60, shownS % 60)
+    val num = TextStyle(fontFamily = Run.num, fontWeight = FontWeight.Bold, fontSize = 34.sp, lineHeight = 34.sp, color = Color.White)
+    Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("%.2f".format(shownKm), style = num)
+            Text("km", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.8f))
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(time, style = num)
+            Text("걸린 시간", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color.White.copy(alpha = 0.8f))
+        }
+    }
+}
+
+private class Piece(val angle: Float, val speed: Float, val spin: Float, val flip: Float, val color: Color, val w: Float, val h: Float)
+
+/** 도착 축하: 화면 가운데서 색종이가 한 번 터져 떨어진다 (2.6초, 되풀이하지 않는다) */
+@Composable
+private fun Confetti(modifier: Modifier) {
+    val colors = listOf(Run.accent, Run.coral, Color(0xFF9DB8FF), Color(0xFFFFC94A), Run.ink)
+    val pieces = remember {
+        val rng = java.util.Random()
+        List(80) {
+            Piece(
+                angle = (rng.nextFloat() * 2 * Math.PI).toFloat(),
+                speed = 220f + rng.nextFloat() * 480f,
+                spin = -540f + rng.nextFloat() * 1080f,
+                flip = 4f + rng.nextFloat() * 8f,
+                color = colors[it % colors.size],
+                w = 6f + rng.nextFloat() * 4f,
+                h = 10f + rng.nextFloat() * 6f,
+            )
+        }
+    }
+    val t = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { t.animateTo(1f, tween(2600, easing = LinearEasing)) }
+    if (t.value >= 1f) return
+    Canvas(modifier) {
+        val s = t.value * 2.6f                      // 초
+        val alpha = ((1f - t.value) / 0.35f).coerceIn(0f, 1f)
+        val origin = Offset(center.x, center.y - 40.dp.toPx())
+        pieces.forEach { pc ->
+            val vx = kotlin.math.cos(pc.angle) * pc.speed
+            val vy = kotlin.math.sin(pc.angle) * pc.speed - 380f   // 위로 더 튀게
+            val x = origin.x + (vx * s).dp.toPx()
+            val y = origin.y + (vy * s + 0.5f * 980f * s * s).dp.toPx()
+            val w = pc.w.dp.toPx() * abs(kotlin.math.cos(pc.flip * s))
+            val h = pc.h.dp.toPx()
+            rotate(pc.spin * s, pivot = Offset(x, y)) {
+                drawRect(pc.color.copy(alpha = alpha), topLeft = Offset(x - w / 2, y - h / 2), size = androidx.compose.ui.geometry.Size(w, h))
+            }
+        }
     }
 }

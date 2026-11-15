@@ -55,6 +55,8 @@ class RunState(val username: String) {
     var voiceOn by mutableStateOf(true)
     var following by mutableStateOf(true)
     var arrived by mutableStateOf(false)
+    var finishKm by mutableStateOf<Double?>(null)        // 도착 판에 보일 실제로 나아간 거리·걸린 시간
+    var finishSeconds by mutableStateOf(0L)
     var rating by mutableStateOf<Rating?>(null)
     var taste by mutableStateOf<List<String>>(emptyList())
 
