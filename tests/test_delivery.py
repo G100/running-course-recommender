@@ -88,6 +88,38 @@ def test_when_the_tmap_daily_limit_is_used_up_the_runner_is_told_why(monkeypatch
     assert main._deliver_on_tmap(_plan(TARGET), TARGET, "loop", lambda km: None)["tmap_unchecked"] == "daily_limit"
 
 
+def test_when_tmap_keeps_changing_the_stretch_one_more_try_is_made(monkeypatch):
+    """해운대 3km: Tmap이 늘리는 비율이 잴 때마다 달랐다(1.07배 → 1.03배 → 0.90배, 설계와 다른 길로 질러감).
+    세 번 이어도 가장 가까운 게 5.3% 차이였다 — 못 맞췄을 때만 한 번 더 잇는다."""
+    tmap_km = [3.20, 2.84, 2.59, 3.02]   # 해운대에서 잰 대로: 길었다 → 짧았다 → 더 짧았다(질러감) → 한 번 더
+    calls = []
+
+    def follow(path, target_km=None):
+        plan_km = haversine_m(path[0], path[-1]) / 1000
+        stretch = tmap_km[len(calls)] / plan_km
+        calls.append(stretch)
+        return _tmap_follow(stretch)[0](path, target_km)
+
+    monkeypatch.setattr(main, "_follow_with_tmap", follow)
+    asked = []
+    course = main._deliver_on_tmap(_plan(3.0), 3.0, "loop", lambda km: asked.append(km) or _plan(km))
+    assert len(calls) == 4 and abs(course["distance_km"] - 3.0) / 3.0 <= 0.05, course["distance_km"]
+
+
+def test_the_next_size_is_read_between_a_short_and_a_long_try():
+    """짧았던 시도(설계 2.75 → 2.84km)와 길었던 시도(3.01 → 3.20km)가 있으면 그 사이를 비례로 짚는다."""
+    tries = [(0, {"distance_km": 3.01}, {"follow": {"distance_km": 3.20}}),
+             (0, {"distance_km": 2.75}, {"follow": {"distance_km": 2.84}})]
+    assert main._next_plan_km(tries, 3.0) == pytest.approx(2.75 + (3.0 - 2.84) / (3.20 - 2.84) * (3.01 - 2.75))
+
+
+def test_already_matched_routes_are_not_tried_again(monkeypatch):
+    follow, calls = _tmap_follow(stretch=1.02)
+    monkeypatch.setattr(main, "_follow_with_tmap", follow)
+    main._deliver_on_tmap(_plan(TARGET), TARGET, "loop", lambda km: pytest.fail("이미 맞는다"))
+    assert len(calls) == 1
+
+
 def test_a_route_tmap_shrinks_to_a_stub_is_not_given(monkeypatch):
     """광주 용봉동: 0.2km 순환 설계를 Tmap으로 이으니 0.02km(한 지점 왕복)가 됐다. 코스가 작아 '설계를 다 따라갔다'는
     확인도 통과했다. 이은 길이 설계의 절반도 안 되면 다른 코스다 — 쓰지 않고 설계를 주되 그렇다고 알린다."""

@@ -487,9 +487,25 @@ def _follow_with_tmap(path: list, target_km: float = None) -> dict:
 
 
 DAILY_LIMIT_TEXT = "오늘 Tmap 길 확인 횟수를 다 썼어요."   # 한도가 풀리는 시각은 확인하지 못해 약속하지 않는다
-MAX_TMAP_ROUNDS = 3     # Tmap으로 잇고 거리를 재는 횟수 (처음 + 크기를 고쳐 다시 짜기 2번)
+# Tmap으로 잇고 거리를 재는 횟수 (처음 + 크기를 고쳐 다시 짜기). 5% 안에 들면 바로 멈추므로 대부분은 1~2번이고,
+# 4번째는 세 번 이어도 못 맞춘 코스만 한다 — 해운대 3km는 Tmap이 늘리는 비율이 잴 때마다 달라(1.07·1.03·0.90배)
+# 세 번 뒤 가장 가까운 게 5.3%였다
+MAX_TMAP_ROUNDS = 4
 DISTANCE_OK = 0.05      # 실제로 달릴 경로가 요청 거리와 이 비율 안이어야 한다
 TMAP_SHRUNK = 0.5       # Tmap으로 이은 길이 설계의 이 비율보다 짧으면 다른 코스가 된 것이다 (쓰지 않는다)
+
+
+def _next_plan_km(tries: list, target_km: float) -> float:
+    """다음에 짤 설계 크기. Tmap으로 이은 거리가 목표보다 짧았던 시도와 길었던 시도가 둘 다 있으면 그 사이를
+    비례로 짚는다(설계 크기 → Tmap 거리가 그 사이에서 곧다고 본다). 한쪽뿐이면 마지막 시도에서 Tmap이 늘린(줄인)
+    비율만큼 고친다. tries는 [(차이, 설계, Tmap 경로), ...]."""
+    seen = [(p["distance_km"], r["follow"]["distance_km"]) for _, p, r in tries]
+    shorter = max((s for s in seen if s[1] < target_km), key=lambda s: s[1], default=None)
+    longer = min((s for s in seen if s[1] > target_km), key=lambda s: s[1], default=None)
+    if shorter and longer and longer[0] > shorter[0]:
+        return shorter[0] + (target_km - shorter[1]) / (longer[1] - shorter[1]) * (longer[0] - shorter[0])
+    plan_km, tmap_km = seen[-1]
+    return plan_km * target_km / tmap_km
 
 
 def _deliver_on_tmap(plan: dict, target_km: float, route_type: str, regenerate) -> dict:
@@ -499,7 +515,7 @@ def _deliver_on_tmap(plan: dict, target_km: float, route_type: str, regenerate) 
     달리는 건 Tmap 경로이므로 그 거리로 맞춘다.
     - 편도: 길면 요청 거리에서 끝낸다(잘라도 코스가 된다).
     - 순환·왕복: 자르면 출발점으로 돌아오지 못하니, Tmap이 늘린(줄인) 비율만큼 크기를 고쳐 다시 짜고
-      다시 잇는다(최대 2번). 가장 가까웠던 것을 쓴다.
+      다시 잇는다(최대 3번, 짧았던 시도와 길었던 시도 사이를 짚어서). 가장 가까웠던 것을 쓴다.
     Tmap을 쓸 수 없으면(키 없음·장애·하루 한도) 우리가 짠 코스를 그대로 주되, Tmap으로 길을 확인하지 못했다고
     표시한다(tmap_unchecked: daily_limit 또는 unavailable) — 화면이 러너에게 알린다. 안내 시작 때 다시 잇는다.
     """
@@ -528,7 +544,7 @@ def _deliver_on_tmap(plan: dict, target_km: float, route_type: str, regenerate) 
             break   # 아래에서 요청 거리만큼 자른다
         if attempt == MAX_TMAP_ROUNDS - 1 or not km:
             break
-        resized = regenerate(plan["distance_km"] * target_km / km)
+        resized = regenerate(_next_plan_km(tries, target_km))
         if resized is None:
             break
         plan = resized
