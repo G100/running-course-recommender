@@ -24,8 +24,18 @@ DB_PATH = os.path.join("data", "osm_local", "korea.sqlite")
 PBF_PATH = os.path.join("data", "osm_extract", "south-korea.osm.pbf")
 # 팀 전원이 같은 지도를 쓰도록 날짜를 고정한 파일을 받는다. "latest"를 받으면 받은 날마다 데이터가
 # 달라서, 같은 요청에도 사람마다 다른 경로가 나온다. 바꿀 때는 URL·MD5·BUILD_VERSION을 같이 바꾼다.
-PBF_URL = "https://download.geofabrik.de/asia/south-korea-260929.osm.pbf"
+# Geofabrik은 날짜 파일을 약 1주일만 둔다(매달 1일 파일은 약 3달, 1월 1일 파일만 계속) — 고정한 9월 29일 파일이
+# 사라져서 팀원 설치가 404로 멈췄다. 그래서 같은 파일을 우리 서버(deploy/server_setup.sh가 /files/에 둔다)에서
+# 먼저 받고, 안 되면 Geofabrik을 시도한다. 서버 주소가 바뀌면 RUNMATE_PBF_URL로 준다.
+PBF_NAME = "south-korea-260929.osm.pbf"
+PBF_URL = f"https://download.geofabrik.de/asia/{PBF_NAME}"
+TEAM_PBF_URL = f"https://20-89-44-31.sslip.io/files/{PBF_NAME}"
 PBF_MD5 = "7775afecd9ccbf3285ace3f1fa2ec7f4"
+
+
+def pbf_sources() -> list:
+    """팀 기준 지도 파일을 받을 곳 (앞에서부터 시도)."""
+    return [os.environ.get("RUNMATE_PBF_URL") or TEAM_PBF_URL, PBF_URL]
 # DB를 만드는 코드가 바뀌면 올린다. 설치 스크립트가 이 값이 다른 DB를 다시 만든다.
 BUILD_VERSION = "2026-10-01-safety"
 CELL_DEG = 0.02
@@ -250,24 +260,37 @@ def load_bbox(bbox: tuple, db_path: str = None, kinds: str = None) -> list:
 # ── 여기부터는 DB를 만드는 쪽 (osmium 필요) ──
 
 def download(pbf_path: str):
+    """팀 기준 지도 파일을 받을 곳에서 차례로 받는다. MD5가 다르거나 받지 못하면 다음 곳을 시도한다."""
     import requests
-    os.makedirs(os.path.dirname(pbf_path), exist_ok=True)
-    print(f"내려받는 중: {PBF_URL}")
-    with requests.get(PBF_URL, stream=True, timeout=60, allow_redirects=True) as response:
-        response.raise_for_status()
-        total = int(response.headers.get("content-length", 0))
-        done = 0
-        with open(pbf_path + ".part", "wb") as f:
-            for chunk in response.iter_content(1 << 20):
-                f.write(chunk)
-                done += len(chunk)
-                if total and done % (20 << 20) < (1 << 20):
-                    print(f"  {done >> 20}/{total >> 20} MB", flush=True)
-    got = file_md5(pbf_path + ".part")
-    if got != PBF_MD5:
-        os.remove(pbf_path + ".part")
-        raise SystemExit(f"받은 파일이 팀 기준 파일과 다릅니다 (MD5 {got}). 다시 시도하거나 팀원에게 파일을 받으세요.")
-    os.replace(pbf_path + ".part", pbf_path)
+    os.makedirs(os.path.dirname(pbf_path) or ".", exist_ok=True)
+    part = pbf_path + ".part"
+    problems = []
+    for url in pbf_sources():
+        print(f"내려받는 중: {url}")
+        try:
+            with requests.get(url, stream=True, timeout=60, allow_redirects=True) as response:
+                response.raise_for_status()
+                total = int(response.headers.get("content-length", 0))
+                done = 0
+                with open(part, "wb") as f:
+                    for chunk in response.iter_content(1 << 20):
+                        f.write(chunk)
+                        done += len(chunk)
+                        if total and done % (20 << 20) < (1 << 20):
+                            print(f"  {done >> 20}/{total >> 20} MB", flush=True)
+        except requests.RequestException as error:
+            problems.append(f"{url}: {error}")
+            if os.path.exists(part):
+                os.remove(part)
+            continue
+        got = file_md5(part)
+        if got == PBF_MD5:
+            os.replace(part, pbf_path)
+            return
+        os.remove(part)
+        problems.append(f"{url}: 팀 기준 파일과 다릅니다 (MD5 {got})")
+    raise SystemExit("팀 기준 지도 파일을 받지 못했습니다.\n  " + "\n  ".join(problems)
+                     + f"\n팀원에게 {PBF_NAME} 파일(MD5 {PBF_MD5})을 받아 --pbf 경로로 주세요.")
 
 
 def build(pbf_path: str, db_path: str):

@@ -353,7 +353,7 @@ python -m src.setup_local                   # 위 "빠른 시작"의 설치 스�
 python -m src.data_collection.local_osm     # 지도 DB만 따로 만들 때 (팀 기준 날짜 파일, 결과 약 880MB)
 ```
 
-받는 지도 파일은 날짜를 고정했다(`south-korea-260929.osm.pbf`, MD5 확인). "latest"를 받으면 받은 날마다 데이터가 달라서 같은 요청에도 사람마다 다른 경로가 나온다. 지도를 새 날짜로 바꿀 때는 `local_osm.py`의 `PBF_URL`·`PBF_MD5`·`BUILD_VERSION`을 같이 바꾸고 팀 전원이 설치 스크립트를 다시 돌린다.
+받는 지도 파일은 날짜를 고정했다(`south-korea-260929.osm.pbf`, MD5 확인). "latest"를 받으면 받은 날마다 데이터가 달라서 같은 요청에도 사람마다 다른 경로가 나온다. Geofabrik은 날짜 파일을 약 1주일만 두므로(매달 1일 파일은 약 3달, 1월 1일 파일만 계속), 같은 파일을 우리 서버(`https://20-89-44-31.sslip.io/files/`)에서 먼저 받고 안 되면 Geofabrik을 시도한다. 서버 주소가 바뀌면 환경변수 `RUNMATE_PBF_URL`로 준다. 지도를 새 날짜로 바꿀 때는 `local_osm.py`의 `PBF_NAME`·`PBF_MD5`·`BUILD_VERSION`을 같이 바꾸고, 서버의 `/srv/runmate-files/`에 새 파일을 둔 뒤 팀 전원이 설치 스크립트를 다시 돌린다.
 
 | | Overpass (기본) | 로컬 지형 데이터 |
 |---|---|---|
@@ -368,7 +368,7 @@ python -m src.data_collection.local_osm     # 지도 DB만 따로 만들 때 (�
 - 지도 DB가 어떤 파일·어떤 버전으로 만들어졌는지 DB 안에 기록되고, `/health`의 `local_map`에서 확인할 수 있다
 - 길이 막다른 길인지는 변환할 때 전국 도로망으로 판정해 둔다. 경유지는 막다른 길에 잡지 않는다
 - 길 점수 모델(`data/road_model.json`)은 저장소에 들어 있어 다시 학습할 필요 없다. 다시 하려면 `python -m src.recommend.learn_roads --cells 2496`
-- 내려받기가 안 되면 https://download.geofabrik.de/asia/south-korea.html 에서 `.osm.pbf`를 직접 받아 `--pbf 경로`로 준다
+- 내려받기가 안 되면 팀원에게 `south-korea-260929.osm.pbf`(MD5 `7775afecd9ccbf3285ace3f1fa2ec7f4`)를 받아 `--pbf 경로`로 준다. 다른 날짜 파일로 만들면 팀과 경로가 달라진다
 
 ## 안드로이드 앱 (만드는 중)
 

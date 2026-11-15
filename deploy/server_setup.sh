@@ -11,7 +11,8 @@
 #   2. 저장소 받기(있으면 최신으로)
 #   3. 가상환경에 패키지 설치 + src.setup_local (지도 파일 받기·MD5 확인·전국 지형 DB 만들기 약 8분·테스트)
 #   4. 서버 자동 실행(systemd): 켜면 뜨고, 죽으면 다시 뜬다. 127.0.0.1:8000 에서만 듣는다
-#   5. HTTPS(Caddy): <공인 IP를 - 로 이은 것>.sslip.io 주소로 인증서를 자동으로 받는다 (도메인을 사지 않아도 된다)
+#   5. HTTPS(Caddy): <공인 IP를 - 로 이은 것>.sslip.io 주소로 인증서를 자동으로 받는다 (도메인을 사지 않아도 된다).
+#      팀원 설치용 지도 원본도 /files/ 에서 내려준다
 #   6. 방화벽: 이미지가 80·443을 막아 두었으면 연다 (클라우드 쪽 방화벽/보안 그룹에서도 열어야 한다)
 #
 # 비밀값(.env: TMAP_APP_KEY·DATABASE_URL 등)은 이 스크립트가 만들지 않는다. 처음 한 번 ~/runmate/.env 에 직접 넣는다.
@@ -88,13 +89,25 @@ sudo systemctl restart runmate
 echo "▶ 5. HTTPS (Caddy)"
 IP=$(curl -fsS https://api.ipify.org)
 DOMAIN="${IP//./-}.sslip.io"
+# 팀원 설치용 지도 원본을 /files/ 에서 내려준다 (Geofabrik은 날짜 파일을 1주일만 둔다 — src/data_collection/local_osm.py)
+FILES=/srv/runmate-files
+sudo mkdir -p $FILES
+PBF_NAME=$($PY -c "from src.data_collection.local_osm import PBF_NAME; print(PBF_NAME)")
+sudo cp -u data/osm_extract/south-korea.osm.pbf "$FILES/$PBF_NAME"
+sudo chmod 644 "$FILES/$PBF_NAME"
 sudo tee /etc/caddy/Caddyfile >/dev/null <<CADDY
 $DOMAIN {
-    encode gzip
-    reverse_proxy 127.0.0.1:8000 {
-        # 긴 코스는 그 자리에서 새로 짜느라 1~2분 걸릴 수 있다
-        transport http {
-            read_timeout 300s
+    handle_path /files/* {
+        root * $FILES
+        file_server
+    }
+    handle {
+        encode gzip
+        reverse_proxy 127.0.0.1:8000 {
+            # 긴 코스는 그 자리에서 새로 짜느라 1~2분 걸릴 수 있다
+            transport http {
+                read_timeout 300s
+            }
         }
     }
 }
