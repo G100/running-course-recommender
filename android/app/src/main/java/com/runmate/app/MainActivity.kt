@@ -84,7 +84,8 @@ class MainActivity : ComponentActivity() {
         tts = TextToSpeech(this) { ok -> if (ok == TextToSpeech.SUCCESS) tts?.language = Locale.KOREAN }
 
         val ask = AskActions(find = ::find, searchPlace = ::searchPlace, logOut = ::logOut, openRecords = ::openRecords)
-        val records = RecordsActions(close = { state.showRecords = false }, run = ::runFavorite, remove = ::removeFavorite)
+        val records = RecordsActions(close = { state.showRecords = false }, run = ::runFavorite, remove = ::removeFavorite,
+                                     deleteAll = ::deleteMyData)
         val onMap = MapActions(
             pick = ::pick, edit = ::edit, startGuide = ::startGuide, stopGuide = ::stopGuide,
             toggleVoice = { state.voiceOn = !state.voiceOn; if (!state.voiceOn) tts?.stop() },
@@ -535,6 +536,17 @@ class MainActivity : ComponentActivity() {
         state.showRecords = false
         state.phase = Phase.Course
         drawCourse(fav.course)
+    }
+
+    /** 내 계정과 기록을 모두 지우고 로그인 화면으로 (확인 창에서 '모두 지우기'를 눌렀을 때만 온다) */
+    private fun deleteMyData() {
+        api.deleteMyData(userId()) { result ->
+            result.onSuccess { goToLogin("내 데이터를 모두 지웠어요.") }
+                .onFailure {
+                    if (needsLoginAgain(it)) return@onFailure goToLogin(getString(R.string.login_again))
+                    show("지우지 못했어요: ${(it as? ServerError)?.detail ?: it.message}")
+                }
+        }
     }
 
     private fun removeFavorite(fav: Favorite) {

@@ -1,6 +1,7 @@
 package com.runmate.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,8 +24,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,6 +49,7 @@ class RecordsActions(
     val close: () -> Unit,
     val run: (Favorite) -> Unit,
     val remove: (Favorite) -> Unit,
+    val deleteAll: () -> Unit,
 )
 
 /** 내 기록: 평가 숫자, 서버가 정리한 취향, 좋아한 풍경, 즐겨찾기(눌러서 바로 달리기), 내가 한 평가. */
@@ -107,6 +115,19 @@ fun RecordsScreen(state: RunState, actions: RecordsActions) {
             Section("내가 한 평가")
             taste.history.forEachIndexed { i, run -> Appear(i, stagger = 40) { RunRow(run) } }
         }
+        // 내 데이터 모두 지우기 — 되돌릴 수 없어서 확인 창을 거친다
+        var asking by remember { mutableStateOf(false) }
+        Text("내 데이터 모두 지우기", fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Run.coralInk,
+            modifier = Modifier.padding(top = 28.dp).clip(RoundedCornerShape(50)).border(1.dp, Run.coralSoft, RoundedCornerShape(50))
+                .clickable { asking = true }.padding(horizontal = 18.dp, vertical = 12.dp))
+        if (asking) AlertDialog(
+            onDismissRequest = { asking = false },
+            title = { Text("내 데이터를 모두 지울까요?") },
+            text = { Text("계정과 취향·평가·즐겨찾기를 모두 지웁니다. 되돌릴 수 없어요.") },
+            confirmButton = { TextButton(onClick = { asking = false; actions.deleteAll() }) { Text("모두 지우기", color = Run.coralInk) } },
+            dismissButton = { TextButton(onClick = { asking = false }) { Text("취소", color = Run.ink) } },
+            containerColor = Run.bg, titleContentColor = Run.ink, textContentColor = Run.mute,
+        )
         Spacer(Modifier.height(24.dp))
     }
 }

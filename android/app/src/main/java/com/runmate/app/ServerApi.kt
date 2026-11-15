@@ -97,6 +97,10 @@ class ServerApi(private val baseUrl: String, private val token: () -> String? = 
         }
     }, done)
 
+    /** 내 계정과 취향·평가·즐겨찾기를 모두 지운다 (되돌릴 수 없다). */
+    fun deleteMyData(userId: String, done: (Result<Unit>) -> Unit) =
+        call(send("DELETE", "/users/${enc(userId)}") { }, done)
+
     private fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 
     private fun <T> call(task: () -> T, done: (Result<T>) -> Unit) {
