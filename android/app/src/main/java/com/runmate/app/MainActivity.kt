@@ -290,6 +290,7 @@ class MainActivity : ComponentActivity() {
     private var navBearing = 0f          // 앞길 방향 (목표)
     private var shownAt: LatLng? = null  // 지금 화면에 그려 둔 화살표 위치
     private var shownBearing = 0f        // 지금 화면의 지도 방향
+    private var shownAlong: Double? = null  // 화살표가 코스 위에 붙어 있으면 코스를 따라 몇 m 지점인지
     private var shownTilt = NAV_TILT     // 지금 화면의 기울기 (안내를 시작할 때만 0에서 기울어진다)
     private var runnerMarker: TMapMarkerItem? = null
     private var glideJob: Job? = null
@@ -299,6 +300,7 @@ class MainActivity : ComponentActivity() {
         runnerMarker = null
         shownAt = null
         shownBearing = 0f
+        shownAlong = null
         navCum = null
     }
 
@@ -310,23 +312,37 @@ class MainActivity : ComponentActivity() {
     private fun followRunner(at: LatLng, running: Guide, ms: Long = GPS_EVERY_MS) {
         if (!mapReady) return
         val path = running.currentPath()
-        val cum = navCum?.takeIf { it.first === path }?.second ?: Geo.cumulative(path).also { navCum = path to it }
-        val onPath = Geo.pointAt(path, cum, running.progressM)
-        val ahead = Geo.pointAt(path, cum, running.progressM + 30)
-        if (Geo.meters(onPath, ahead) > 3) navBearing = Geo.bearing(onPath, ahead).toFloat()
+        val sameRoute = navCum?.first === path
+        val cum = navCum?.takeIf { sameRoute }?.second ?: Geo.cumulative(path).also { navCum = path to it }
+        // 코스 위에 있으면 화살표를 코스 위에 붙여 길을 따라 움직인다 (내비처럼). 모퉁이도 대각선으로 가로지르지 않고
+        // 길을 따라 돌고, 지도는 그 자리의 길 방향으로 돈다. 코스에서 멀면(벗어남) GPS 위치 그대로, 움직인 방향으로.
+        val snapped = Geo.onPath(at, path, cum, running.progressM).offM <= SNAP_M
+        val toAlong = running.progressM
+        val fromAlong = shownAlong?.takeIf { sameRoute && snapped && it <= toAlong } ?: toAlong
         val from = shownAt ?: at
-        val fromBearing = shownBearing
+        if (!snapped) shownAt?.let { if (Geo.meters(it, at) > 3) navBearing = Geo.bearing(it, at).toFloat() }
         val fromTilt = shownTilt
-        // 돌 각도는 가까운 쪽으로 (350° → 10° 는 20°만 돈다)
-        val turn = ((navBearing - fromBearing + 540f) % 360f) - 180f
         val engine = engine()
         glideJob?.cancel()
         glideJob = lifecycleScope.launch {
             val start = android.os.SystemClock.uptimeMillis()
+            var b = shownBearing
             while (true) {
                 val t = ((android.os.SystemClock.uptimeMillis() - start).toFloat() / ms).coerceIn(0f, 1f)
-                val p = LatLng(from.lat + (at.lat - from.lat) * t, from.lng + (at.lng - from.lng) * t)
-                val b = (fromBearing + turn * t + 360f) % 360f
+                val p: LatLng
+                if (snapped) {
+                    val d = fromAlong + (toAlong - fromAlong) * t
+                    // 화살표가 처음 코스에 붙을 때는 GPS 위치에서 코스 위로 미끄러지듯 옮겨 간다
+                    val onRoad = Geo.pointAt(path, cum, d)
+                    p = if (shownAlong == null || !sameRoute) LatLng(from.lat + (onRoad.lat - from.lat) * t, from.lng + (onRoad.lng - from.lng) * t) else onRoad
+                    Geo.headingAt(path, cum, d)?.let { navBearing = it.toFloat() }
+                    shownAlong = d
+                } else {
+                    p = LatLng(from.lat + (at.lat - from.lat) * t, from.lng + (at.lng - from.lng) * t)
+                    shownAlong = null
+                }
+                // 지도 방향은 매 화면 목표 쪽으로 조금씩 (가까운 쪽으로 돈다: 350° → 10°는 20°만)
+                b = ((b + Geo.turnDegrees(b.toDouble(), navBearing.toDouble()).toFloat() * TURN_EASE) + 360f) % 360f
                 val tilt = fromTilt + (NAV_TILT - fromTilt) * t
                 shownAt = p
                 shownBearing = b
@@ -773,6 +789,8 @@ class MainActivity : ComponentActivity() {
         private const val GPS_LOST_MS = 10_000L
         private const val PACE_MIN_PER_KM = 6.0   // 도착 예정 시각 계산용
         private const val NAV_ZOOM = 17.5          // 달리는 중 확대 (골목 하나하나가 보이는 정도)
+        private const val SNAP_M = 20.0           // 코스에서 이 안이면 화살표를 코스 위에 붙인다
+        private const val TURN_EASE = 0.12f       // 지도 방향이 한 화면(1/60초)에 목표까지 남은 각도의 이만큼 돈다 (약 0.3초면 거의 다 돈다)
         private const val NAV_TILT = 55f           // 달리는 중 지도 기울기 (도) — 앞길이 멀리까지 입체로 보인다
         private const val NAV_FOCUS_Y = 0.68f      // 달리는 중 내 위치를 화면 위에서 이만큼 내려온 곳에 둔다
     }
