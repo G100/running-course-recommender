@@ -153,6 +153,38 @@ class TestPathsTmapDoesNotHave:
         assert graph.surfaces[0] == "walkway", "다시 짜려고 막은 길은 원래대로 돌려 놓는다"
 
 
+class TestTmapCuttingAcross:
+    """광주 용봉동 5km: Tmap이 우리 지도에 없는 캠퍼스 안 길로 질러가 코스 남쪽·동쪽 절반을 건너뛰었다(설계를 56%만 덮음).
+    건너뛴 길은 84%가 인도 딸린 큰길·이면도로 — Tmap 지도에 없는 길이 아니다. 그 길을 빼고 다시 짜면 안 되고,
+    건너뛴 구간에 경유지를 더 찍어 우리 길로 데려가야 한다."""
+
+    def _towns(self):
+        a, b = (LAT, LNG), (LAT, LNG + 6 * D)
+        north = [a] + [(LAT + D, LNG + i * D) for i in range(7)] + [b]            # 우리 코스: 이면도로
+        south = [a] + [(LAT - 2 * D, LNG + i * D) for i in range(7)] + [b]        # 다른 길 (빼고 다시 짜면 이리로 간다)
+        cut = [a, (LAT, LNG + 3 * D), b]                                          # Tmap만 아는 지름길 (캠퍼스 안)
+        ours = [_way(1, north, highway="residential", sidewalk="both"), _way(3, south, highway="residential", sidewalk="both")]
+        theirs = ours + [_way(2, cut, highway="footway")]
+        graph = rg.RoadGraph(ours, build_indexes({"all": ours}), rg.PRIOR, facts={})
+        tmap_graph = rg.RoadGraph(theirs, build_indexes({"all": theirs}), rg.PRIOR, facts={})
+        return graph, tmap_graph, north
+
+    def test_more_waypoints_bring_tmap_back_onto_our_streets(self, monkeypatch):
+        graph, tmap_graph, north = self._towns()
+        calls = []
+
+        def tmap(start, end, start_name="", end_name="", waypoints=None):
+            calls.append(1)
+            stops = [(lat, lng) for lng, lat in waypoints or []]
+            return rg.route(tmap_graph, (start[1], start[0]), (end[1], end[0]), stops)
+
+        monkeypatch.setattr(tmap_follow, "get_route", tmap)
+        follow = tmap_follow.follow(graph, [list(p) for p in north])["follow"]
+        assert not follow["replanned"], "보통 길을 건너뛴 것이다 — 그 길을 빼고 다시 짜지 않는다"
+        assert follow["plan_covered"] >= tmap_follow.FOLLOW_MIN, follow
+        assert follow["calls"] == len(calls) == 2, "두 번째로 묻는 건 한 번뿐이다 (호출이 늘지 않는다)"
+
+
 class TestLearningWhatTmapUses:
     """Tmap에 물을 때마다 우리 길 중 Tmap이 탄 길과 피한 길을 적어 둔다. 다음부터는 피한 길로 짜지 않아서
     처음 한 번에 맞는다 (다시 묻는 호출이 줄고, 다시 짜느라 거리가 늘어나는 일도 줄어든다)."""
@@ -194,6 +226,15 @@ def test_answer_within_the_distance_limit_is_chosen_first():
     far = {"ok": True, "distance_km": 5.2, "plan_covered": 0.97}
     assert tmap_follow._better(close, far, 3.0)
     assert not tmap_follow._better(far, close, 3.0)
+
+
+def test_when_both_miss_the_distance_the_one_that_keeps_our_course_is_chosen():
+    """광주 용봉동 5km: 질러간 첫 시도(4.62km, 설계 44% 덮음)와 경유지를 더 찍은 두 번째(5.71km, 81%)가 둘 다
+    5% 밖이었는데, 거리 차이가 작다고 질러간 쪽을 골랐다. 거리는 다음에 크기를 고쳐 다시 짜면 맞출 수 있지만
+    질러간 모양은 그대로 남는다 — 둘 다 5% 밖이면 우리 코스를 더 따라간 쪽을 쓴다."""
+    cut = {"ok": False, "distance_km": 4.62, "plan_covered": 0.436}
+    kept = {"ok": False, "distance_km": 5.71, "plan_covered": 0.813}
+    assert tmap_follow._better(kept, cut, 5.0) and not tmap_follow._better(cut, kept, 5.0)
 
 
 class TestSpikes:

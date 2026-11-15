@@ -269,6 +269,22 @@ def _skipped_ways(graph, nodes: list, tmap_path: list) -> set:
     return skipped
 
 
+PATH_SHARE = 0.5   # 건너뛴 길 중 보행로가 이만큼 넘으면 'Tmap 지도에 없는 길'로 본다
+
+
+def _mostly_paths(graph, ways: set) -> bool:
+    """건너뛴 길(길이 기준)의 절반 넘게가 공원·단지 안 보행로·계단인가.
+
+    수원 광교 3km: 건너뛴 길의 56%가 공원 보행로였다(Tmap 지도에 없다 → 빼고 다시 짜야 한다).
+    광주 용봉동 5km: 84%가 인도 딸린 큰길·이면도로였다(Tmap이 캠퍼스 안 길로 질러갔다 → 경유지를 더 찍어야 한다)."""
+    def length(way):
+        points = graph.ways[way][1]
+        return sum(haversine_m(a, b) for a, b in zip(points, points[1:]))
+    total = sum(length(w) for w in ways)
+    paths = sum(length(w) for w in ways if graph.surfaces[w] in ("walkway", "steps"))
+    return total > 0 and paths / total > PATH_SHARE
+
+
 def _replan_around(graph, nodes: list, skipped: set):
     """Tmap이 타지 않은 길을 빼고, 나머지 코스 모양은 지키며 다시 짠다. (새 코스, Tmap에 줄 경유지) 또는 None."""
     from .road_graph import BLOCKED, route
@@ -298,10 +314,13 @@ DISTANCE_OK = 0.05   # 요청 거리와 이 비율 안이어야 한다
 
 
 def _better(a: dict, b: dict, target_km: float) -> bool:
-    """a가 b보다 나은가: 요청 거리와 5% 안인 것이 먼저(거리가 틀리면 안 된다), 그다음 검사 통과,
-    그다음 거리가 더 가까운 것, 그다음 우리 설계를 더 따라간 것."""
+    """a가 b보다 나은가: 요청 거리와 5% 안인 것이 먼저(거리가 틀리면 안 된다), 그다음 검사 통과.
+    둘 다 5% 안이면 거리가 더 가까운 것이 먼저다. 둘 다 5% 밖이면 우리 설계를 더 따라간 것이 먼저다 — 거리는
+    부르는 쪽(main._deliver_on_tmap)이 크기를 고쳐 다시 짜서 맞추지만, 질러간 모양은 그래도 남는다
+    (광주 용봉동 5km: 4.62km·44%와 5.71km·81% 중 앞의 것을 골라 캠퍼스를 가로지르는 코스가 나갔다)."""
     gap = lambda r: abs(r["distance_km"] - target_km) / target_km if target_km else 0
-    rank = lambda r: (gap(r) > DISTANCE_OK, not r["ok"], gap(r), -r["plan_covered"])
+    rank = lambda r: (gap(r) > DISTANCE_OK, not r["ok"],
+                      -r["plan_covered"] if gap(r) > DISTANCE_OK else gap(r), gap(r), -r["plan_covered"])
     return rank(a) < rank(b)
 
 
@@ -454,7 +473,9 @@ def follow(graph, plan_path: list, start: tuple = None, end: tuple = None, targe
     target = target_km or plan_km
     if not result["ok"] or abs(result["distance_km"] - target) > target * DISTANCE_OK:
         skipped = _skipped_ways(graph, nodes, extract_path(route)[0])
-        again = _replan_around(graph, nodes, skipped) if skipped else None
+        # 건너뛴 길이 대개 보행로면 Tmap 지도에 없는 길이다 — 빼고 다시 짠다. 대개 큰길·이면도로면 Tmap이 우리 지도에
+        # 없는 지름길로 질러간 것이다 — 빼면 엉뚱한 쪽으로 다시 짠다. 그때는 건너뛴 구간에 경유지를 더 찍는다(아래)
+        again = _replan_around(graph, nodes, skipped) if skipped and _mostly_paths(graph, skipped) else None
         if again is not None:
             new_plan, new_points = again
             new_path = extract_path(new_plan)[0]
