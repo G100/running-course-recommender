@@ -468,3 +468,84 @@ def test_a_piece_refused_for_the_daily_limit_is_not_asked_again(monkeypatch):
     with pytest.raises(DailyLimitReached):
         tmap_follow.stitch((LAT, LNG), (LAT, LNG + D), [(LAT + D, LNG)])
     assert len(asked) == 1
+
+
+class TestCrossingBackAndForth:
+    """큰길 한가운데(도로 중심선)에 찍힌 경유지를 Tmap이 맞은편 인도에 붙이면, 길을 건너가 경유지를 찍고 바로
+    되건너온다 — 안 건너도 되는 횡단보도 두 번 (광주 용봉동 1km: 우치로를 건넜다 되건너와 횡단보도 7개).
+    그 경유지를 건너기 전 인도로 옮겨 다시 묻는다."""
+
+    SIDE = 0.00015   # 도로 중심선에서 인도까지 약 17m
+
+    def _tmap(self, calls):
+        """양쪽 인도가 있는 동서 방향 큰길 하나. 점은 가까운 인도에 붙는다 — 한가운데 점은 북쪽 인도에."""
+        from src.data_collection.enrich import haversine_m
+        side = lambda lat: LAT + self.SIDE if lat >= LAT else LAT - self.SIDE
+
+        def tmap(start, end, start_name="", end_name="", waypoints=None):
+            calls.append([(lat, lng) for lng, lat in waypoints or []])
+            stops = [(start[1], start[0])] + [(lat, lng) for lng, lat in waypoints or []] + [(end[1], end[0])]
+            here = side(stops[0][0])
+            line, crossings = [(here, stops[0][1])], []
+            crosswalk = LNG + 3 * D                  # 횡단보도는 가운데 교차로에만 있다
+            for lat, lng in stops[1:]:
+                to = side(lat)
+                if to != here:
+                    line.append((here, crosswalk))   # 지금 인도를 따라 횡단보도까지 가서
+                    crossings.append(line[-1])
+                    line.append((to, crosswalk))     # 건넌다
+                    here = to
+                line.append((to, lng))
+            total = sum(haversine_m(p, q) for p, q in zip(line, line[1:]))
+            return {"features": [
+                {"geometry": {"type": "Point", "coordinates": [line[0][1], line[0][0]]}, "properties": {"totalDistance": round(total)}},
+                {"geometry": {"type": "LineString", "coordinates": [[lng, lat] for lat, lng in line]}, "properties": {"roadType": 21}},
+            ] + [
+                {"geometry": {"type": "Point", "coordinates": [lng, lat]}, "properties": {"turnType": 211, "description": "횡단보도를 건너세요"}}
+                for lat, lng in crossings
+            ] + [
+                {"geometry": {"type": "Point", "coordinates": [line[-1][1], line[-1][0]]}, "properties": {"turnType": 201, "description": "도착"}},
+            ]}
+        return tmap
+
+    def _crossings(self, route):
+        return [f for f in route["features"] if f["geometry"]["type"] == "Point" and f["properties"].get("turnType") == 211]
+
+    def test_waypoint_on_the_far_sidewalk_is_moved_to_this_side(self, monkeypatch):
+        a, b = (LAT - self.SIDE, LNG), (LAT - self.SIDE, LNG + 6 * D)   # 남쪽 인도에서 출발·도착
+        middle = (LAT, LNG + 3 * D)                                      # 큰길 한가운데 경유지
+        calls = []
+        monkeypatch.setattr(tmap_follow, "get_route", self._tmap(calls))
+        first = tmap_follow.stitch(a, b, [middle])
+        assert len(self._crossings(first[0])) == 2   # 건너갔다 되건너온다
+
+        plan = [(LAT, LNG), (LAT, LNG + 6 * D)]
+        route, used, n = tmap_follow.remove_cross_backs(None, a, b, [middle], *first, plan_path=plan, target_km=None)
+        assert self._crossings(route) == []
+        assert len(used) == 1 and used[0][0] < LAT, "경유지가 남쪽(이쪽) 인도로 옮겨져야 한다"
+        assert n == 2 and len(calls) == 2
+
+    def test_a_course_that_really_moves_to_the_other_side_is_left_alone(self, monkeypatch):
+        """맞은편으로 건너가 그쪽으로 계속 가는 코스는 되건너오지 않는다 — 건드리지 않고, 더 묻지도 않는다."""
+        a, b = (LAT - self.SIDE, LNG), (LAT + self.SIDE, LNG + 6 * D)
+        middle = (LAT + self.SIDE, LNG + 3 * D)
+        calls = []
+        monkeypatch.setattr(tmap_follow, "get_route", self._tmap(calls))
+        first = tmap_follow.stitch(a, b, [middle])
+        route, used, n = tmap_follow.remove_cross_backs(None, a, b, [middle], *first, plan_path=None, target_km=None)
+        assert route is first[0] and used == [middle] and n == 1 and len(calls) == 1
+
+    def test_the_moved_waypoint_is_dropped_when_it_breaks_the_distance(self, monkeypatch):
+        """옮겨서 다시 물은 경로가 요청 거리 5% 밖으로 나가면 처음 것을 쓴다 (거리가 먼저다)."""
+        a, b = (LAT - self.SIDE, LNG), (LAT - self.SIDE, LNG + 6 * D)
+        middle = (LAT, LNG + 3 * D)
+        calls = []
+        monkeypatch.setattr(tmap_follow, "get_route", self._tmap(calls))
+        first = tmap_follow.stitch(a, b, [middle])
+        from src.api_clients.tmap_pedestrian import extract_path
+        with_detour_km = extract_path(first[0])[1] / 1000
+        # 건너갔다 오는 약 67m를 빼면 0.61km → 0.55km (11% 짧아진다)
+        route, used, _ = tmap_follow.remove_cross_backs(None, a, b, [middle], *first, plan_path=None, target_km=with_detour_km)
+        assert route is first[0], "처음 것은 요청 거리에 맞았고 고친 경로는 5% 밖이다"
+        route, used, _ = tmap_follow.remove_cross_backs(None, a, b, [middle], *first, plan_path=None, target_km=with_detour_km * 0.9)
+        assert self._crossings(route) == [], "고친 경로가 요청 거리에 더 맞으면 바꾼다"

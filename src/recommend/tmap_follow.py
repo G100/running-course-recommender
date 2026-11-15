@@ -258,6 +258,78 @@ def remove_spikes(graph, start: tuple, end: tuple, points: list, route: dict, ca
     return route, points, calls + more
 
 
+CROSS_TURNS = frozenset(range(211, 218))   # Tmap 횡단보도 안내 (그냥·왼쪽·오른쪽·앞·뒤)
+CROSS_BACK_M = 120     # 길을 건넌 뒤 이 안에서 다시 건너면 '건너갔다 되건너오기'일 수 있다
+CROSS_RETURN_M = 60    # 다시 건넌 곳이 처음 건넌 곳에서 이만큼 안이면 같은 길을 되건너 돌아온 것이다
+NUDGE_BACK_M = 3       # 옮긴 경유지는 건너기 시작한 곳보다 이만큼 앞 (이쪽 인도 위)
+
+
+def _crossings(route: dict, path: list, cum: list) -> list:
+    """Tmap 경로의 횡단보도 안내마다 (경로를 따라 몇 m, 자리). 안내는 경로 순서대로 온다."""
+    out, j = [], 0
+    for feature in route.get("features", []):
+        geometry = feature["geometry"]
+        if geometry["type"] != "Point" or feature.get("properties", {}).get("turnType") not in CROSS_TURNS:
+            continue
+        at = (geometry["coordinates"][1], geometry["coordinates"][0])
+        j = min(range(j, len(path)), key=lambda i: haversine_m(path[i], at))
+        out.append((cum[j], at))
+    return out
+
+
+def _cross_backs(route: dict) -> tuple:
+    """건넜다가 곧 같은 길을 되건너온 구간들 [(시작 m, 끝 m)]과 (경로, 누적 거리)."""
+    from .step_position import cumulative_distances
+    path, _ = extract_path(route)
+    if len(path) < 2:
+        return [], path, [0.0] * len(path)
+    cum = cumulative_distances(path)
+    xs = _crossings(route, path, cum)
+    spans = []
+    for i, (m1, p1) in enumerate(xs):
+        back = [m2 for m2, p2 in xs[i + 1:] if m2 - m1 <= CROSS_BACK_M and haversine_m(p1, p2) <= CROSS_RETURN_M]
+        if back:
+            spans.append((m1, max(back)))
+    return spans, path, cum
+
+
+def remove_cross_backs(graph, start: tuple, end: tuple, points: list, route: dict, calls: int,
+                       plan_path: list = None, target_km: float = None) -> tuple:
+    """큰길을 건너가 경유지를 찍고 바로 되건너오는 곳을 없앤다. (경로, 경유지, 호출 수)
+
+    경유지는 도로 중심선 위에 있다. 넓은 길이면 Tmap이 그 점을 맞은편 인도에 붙여, 길을 건너가 찍고 되건너왔다 —
+    안 건너도 되는 횡단보도 두 번 (광주 용봉동 1km: 우치로를 건넜다 되건너와 횡단보도 7개, 같은 곳의 다른 후보는 0개).
+    되건너온 구간 안의 경유지를 건너기 시작한 곳 바로 앞(이쪽 인도)으로 옮겨 다시 묻는다. 횡단보도가 줄고, 우리 코스를
+    덜 따라가지 않고, 요청 거리 5% 안이던 것이 밖으로 나가지 않을 때만 다시 물은 것을 쓴다 (remove_spikes와 같은 기준)."""
+    from .step_position import cumulative_distances
+    spans, path, cum = _cross_backs(route)
+    if not spans:
+        return route, points, calls
+    nearest_m = lambda p: cum[min(range(len(path)), key=lambda i: haversine_m(path[i], p))]
+    moved = {}
+    for p in points:
+        at = nearest_m(p)
+        span = next((s for s in spans if s[0] <= at <= s[1]), None)
+        if span is not None:
+            before = max(0.0, span[0] - NUDGE_BACK_M)
+            k = max(i for i, c in enumerate(cum) if c <= before)
+            moved[p] = tuple(path[k])
+    if not moved:
+        return route, points, calls   # 경유지 때문이 아니다 (Tmap이 스스로 건너갔다 왔다)
+    new_points = [moved.get(p, p) for p in points]
+    again, more = stitch(start, end, new_points)
+    new_path, new_metres = extract_path(again)
+    _, metres = extract_path(route)
+    count = lambda r, p: len(_crossings(r, p, cumulative_distances(p))) if len(p) > 1 else 0
+    fewer = count(again, new_path) < count(route, path)
+    keeps_shape = plan_path is None or _share_near(plan_path, new_path) >= _share_near(plan_path, path) - SHAPE_SLACK
+    off = lambda m: abs(m / 1000 - target_km) / target_km > DISTANCE_OK
+    keeps_distance = not target_km or off(metres) or not off(new_metres)
+    if fewer and keeps_shape and keeps_distance:
+        return again, new_points, calls + more
+    return route, points, calls + more
+
+
 def _skipped_ways(graph, nodes: list, tmap_path: list) -> set:
     """우리 코스 중 Tmap이 타지 않은 구간 밑의 길들 — 대개 Tmap 지도에 없는 공원·단지 안 보행로다."""
     ref = _dense(tmap_path, 10)
@@ -497,6 +569,7 @@ def follow(graph, plan_path: list, start: tuple = None, end: tuple = None, targe
                 route, result, points = second, second_result, new_points
                 used_plan = new_path if second_result["replanned"] else plan_path
     cleaned, points, calls = remove_spikes(graph, start, end, points, route, calls, plan_path=used_plan, target_km=target)
+    cleaned, points, calls = remove_cross_backs(graph, start, end, points, cleaned, calls, plan_path=used_plan, target_km=target)
     if cleaned is not route:
         route = cleaned
         result = dict(check(route, used_plan, graph), replanned=result["replanned"])
